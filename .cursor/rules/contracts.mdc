@@ -1,0 +1,16 @@
+---
+description: Contract rules for protobuf/OpenAPI packages
+globs:
+  - "libs/contracts/**"
+  - "**/*.proto"
+---
+
+- Packages are versioned: `voxmesh.<domain>.v1`. Breaking changes require a new package version
+  or an explicit, documented migration strategy — `buf breaking` enforces this in CI.
+- Never reuse or renumber existing field numbers; reserve removed fields.
+- Transcript segments are revisioned records: stable prefix + mutable suffix + revision number +
+  final flag. Partials replace the mutable revision of the same segment; they are never emitted
+  as independent final records.
+- Provider-specific (Teams/Meet/Zoom) schemas stay inside their adapters — never add
+  provider-shaped fields to shared contracts.
+- Run `npx @bufbuild/buf lint libs/contracts/proto` before committing contract changes.

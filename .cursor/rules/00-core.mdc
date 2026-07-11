@@ -1,0 +1,15 @@
+---
+description: VoxMesh core development contract — always applies
+alwaysApply: true
+---
+
+- Read `AGENTS.md` before making changes; it is the primary development contract. Architecture
+  invariants there require a superseding ADR to violate — do not work around them locally.
+- Work in small, testable vertical slices tied to a GitHub issue. Branch names:
+  `<type>/<issue>-<slug>` (e.g. `feat/123-wasapi-loopback`).
+- Pin exact dependency versions; never use floating versions like `latest`.
+- Never commit `CMakeUserPresets.json`, secrets, recordings, or transcript data (including in
+  fixtures and prompts).
+- Never log audio, transcript text, participant names, or tokens.
+- If a missing decision blocks correct implementation, stop and ask; otherwise take the safest
+  default and document the assumption in the PR.

@@ -1,0 +1,17 @@
+---
+description: Python standards for VoxMesh AI services
+globs:
+  - "services/ai/**"
+  - "**/*.py"
+---
+
+- Python version pinned per service (`requires-python` + `constraints.txt`); currently 3.12–3.14.
+- FastAPI for management/batch APIs; gRPC for streaming audio and high-throughput paths.
+- `ruff` and `mypy` must pass; pytest for tests.
+- Model access only through the provider interfaces (STT, translation, diarization,
+  summarization, embeddings, vector store) — never import a vendor SDK in business logic and
+  never hard-code a model name outside provider configuration.
+- Record model provider + version on every produced artifact (transcripts, translations,
+  summaries, embeddings).
+- Vector records carry tenant ID, source segment/chapter ID, embedding model + version +
+  dimensions, language, ACL metadata, timestamps (master prompt §17).

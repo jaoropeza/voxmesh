@@ -1,0 +1,23 @@
+---
+description: C++ standards for VoxMesh audio/desktop code
+globs:
+  - "**/*.cpp"
+  - "**/*.hpp"
+  - "**/*.h"
+  - "**/CMakeLists.txt"
+---
+
+- C++20. RAII, value semantics, `std::unique_ptr` ownership, `std::span` for non-owning buffers,
+  `std::chrono` + strong types for time/rates/sequence numbers, bounded queues, stop tokens,
+  deterministic shutdown.
+- Prohibited: owning raw pointers, unbounded queues, detached threads, global mutable state,
+  exceptions crossing C APIs/platform callbacks/thread boundaries, silent audio loss.
+- Audio callbacks are a real-time boundary (master prompt §8): only read the frame, attach
+  sequence/timestamp metadata, push to a preallocated bounded ring buffer, bump lock-free
+  counters, return. No I/O, logging, heap allocation, blocking locks, or DSP inside callbacks.
+- Every dropped or late frame emits a metric and a structured diagnostic event.
+- The common audio core (`libs/cpp/`) must not include platform headers; WASAPI /
+  ScreenCaptureKit / Core Audio / PipeWire code lives under `platform/` behind the
+  `IAudioCaptureBackend` family of interfaces.
+- Third-party deps go through Conan 2 with pinned versions. Tests use GoogleTest/GoogleMock.
+  Keep `clang-format`/`clang-tidy` clean; warnings are errors for project code.
