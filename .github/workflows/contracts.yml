@@ -9,19 +9,35 @@ concurrency:
   group: contracts-${{ github.ref }}
   cancel-in-progress: true
 
+# pull-requests: write lets buf-action post breaking-change findings as a PR
+# comment. contents: read is the default least privilege for checkout.
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   buf:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # Breaking-change detection needs a baseline. Until the contracts land on
+      # main there is nothing to break, and `buf breaking` errors with "had no
+      # .proto files". Gate it on main actually having a proto tree so the very
+      # first contracts PR is green; every later PR is checked normally.
+      - name: Check for a proto baseline on main
+        id: baseline
+        run: |
+          code=$(curl -fsS -o /dev/null -w '%{http_code}' \
+            "https://api.github.com/repos/${{ github.repository }}/contents/libs/contracts/proto?ref=main" || echo "000")
+          echo "exists=$([ "$code" = "200" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: bufbuild/buf-action@v1
         with:
           input: libs/contracts/proto
           lint: true
           format: true
-          # Breaking-change detection against main enforces contract versioning
-          # (voxmesh.<domain>.v1 → v2 for breaking changes).
-          breaking: ${{ github.event_name == 'pull_request' }}
+          # Enforce contract versioning (voxmesh.<domain>.v1 -> v2 for breaking
+          # changes) once a baseline exists on main.
+          breaking: ${{ github.event_name == 'pull_request' && steps.baseline.outputs.exists == 'true' }}
           breaking_against: >-
             https://github.com/${{ github.repository }}.git#branch=main,subdir=libs/contracts/proto
           push: false
