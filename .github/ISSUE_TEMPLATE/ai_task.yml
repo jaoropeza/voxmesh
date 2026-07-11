@@ -1,0 +1,54 @@
+name: AI coding task
+description: Task specification for a delegated AI agent (AGENTS.md format)
+title: "[ai-task]: "
+labels: ["ai-task"]
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Relevant ADRs, files, prior issues.
+    validations:
+      required: true
+  - type: textarea
+    id: allowed
+    attributes:
+      label: Allowed files
+    validations:
+      required: true
+  - type: textarea
+    id: forbidden
+    attributes:
+      label: Forbidden files
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Required tests
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Performance / security / compatibility constraints
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands to run and expected output
+    validations:
+      required: true

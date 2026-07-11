@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: nuget
+    directory: /services/control-plane
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /services/ai/stt
+    schedule:
+      interval: weekly
+# Add ecosystems as they land: npm (apps/web, Phase 3+). Conan is not supported by
+# Dependabot; C++ dependency bumps are manual and tracked via the license inventory.

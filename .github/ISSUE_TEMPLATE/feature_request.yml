@@ -1,0 +1,36 @@
+name: Feature / task
+description: A vertical slice of work with acceptance criteria
+title: "[feat]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / objective
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and out-of-scope
+    validations:
+      required: true
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architectural notes
+      description: Affected planes/components, contract changes, ADRs needed.
+  - type: input
+    id: phase
+    attributes:
+      label: Delivery phase
+      placeholder: "Phase 1"
