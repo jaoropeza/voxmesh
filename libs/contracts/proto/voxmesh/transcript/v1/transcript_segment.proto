@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package voxmesh.transcript.v1;
+
+// A revisioned transcript segment (master prompt §12).
+//
+// Partial results REPLACE the mutable revision of the same segment_id —
+// consumers keep the latest revision per segment and must never append
+// partials as independent final records. Once status is FINAL, no further
+// revisions of that segment_id may be emitted.
+message TranscriptSegment {
+  string tenant_id = 1;
+  string meeting_id = 2;
+  string session_id = 3;
+  string segment_id = 4;
+  // Monotonically increasing per segment_id.
+  uint32 revision = 5;
+  SegmentStatus status = 6;
+  // Text the STT engine has committed to; only grows between revisions.
+  string stable_text = 7;
+  // Trailing text that may still change in the next revision. Empty when FINAL.
+  string mutable_text = 8;
+  // Confirmed participant identity (provider-supplied). Distinct from
+  // diarization_label and never inferred silently (master prompt §15).
+  string participant_id = 9;
+  // Inferred speaker label from diarization ("spk_0", ...). Stored separately
+  // from participant_id; promotion to a confirmed identity is an explicit,
+  // audited operation.
+  string diarization_label = 10;
+  repeated WordTiming words = 11;
+  // Overall segment confidence in [0.0, 1.0].
+  float confidence = 12;
+  // BCP-47 tag of the spoken language, e.g. "en-US".
+  string language = 13;
+  string model_provider = 14;
+  string model_version = 15;
+  // Segment position on the meeting timeline.
+  int64 audio_start_ms = 16;
+  int64 audio_end_ms = 17;
+  // When the STT engine produced this revision.
+  int64 produced_at_unix_ms = 18;
+}
+
+message WordTiming {
+  string text = 1;
+  int64 start_ms = 2;
+  int64 end_ms = 3;
+  float confidence = 4;
+}
+
+enum SegmentStatus {
+  SEGMENT_STATUS_UNSPECIFIED = 0;
+  SEGMENT_STATUS_PARTIAL = 1;
+  SEGMENT_STATUS_FINAL = 2;
+}

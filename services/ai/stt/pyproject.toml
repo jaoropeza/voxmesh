@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voxmesh-stt"
+version = "0.1.0"
+description = "VoxMesh speech-to-text service (management API skeleton; gRPC streaming arrives in Phase 3)"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastapi==0.139.0",
+    "uvicorn==0.51.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "httpx==0.28.1",
+    "ruff==0.15.21",
+    "mypy==2.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"

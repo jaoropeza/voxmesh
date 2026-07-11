@@ -1,0 +1,18 @@
+# Ownership by subsystem (master prompt §22).
+# The repository currently has a single maintainer; the intended team layout is kept below,
+# commented out, and should replace the fallback once GitHub teams exist.
+
+* @jaoropeza
+
+# /apps/desktop-recorder/       @voxmesh/desktop-team
+# /libs/cpp/audio-core/         @voxmesh/audio-core-team
+# /platform/windows/            @voxmesh/windows-team
+# /platform/macos/              @voxmesh/macos-team
+# /platform/linux/              @voxmesh/linux-team
+# /libs/contracts/              @voxmesh/architecture-team @voxmesh/backend-team
+# /services/control-plane/      @voxmesh/backend-team
+# /services/ai/                 @voxmesh/ai-team
+# /infra/                       @voxmesh/platform-team
+# /docs/architecture/           @voxmesh/architecture-team
+# /docs/security/               @voxmesh/security-team
+# /.github/                     @voxmesh/platform-team

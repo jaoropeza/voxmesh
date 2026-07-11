@@ -1,0 +1,97 @@
+name: cpp
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+concurrency:
+  group: cpp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: pipx install clang-format==19.1.7
+      - name: Check formatting
+        run: |
+          git ls-files '*.cpp' '*.hpp' '*.h' | xargs clang-format --dry-run --Werror
+
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            preset: linux-debug
+            conan_settings: ""
+          - os: ubuntu-24.04
+            preset: linux-debug
+            conan_settings: ""
+          # windows-latest has MinGW gcc on PATH, which `conan profile detect` can
+          # pick up while CMake's default generator compiles with MSVC — force the
+          # profile to MSVC (195 = the VS 2026 toolset on windows-latest; conan 2.30+ required for VS 2026).
+          - os: windows-latest
+            preset: windows-debug
+            conan_settings: >-
+              -s compiler=msvc -s compiler.version=195 -s compiler.runtime=dynamic
+          - os: macos-15
+            preset: macos-arm64-debug
+            conan_settings: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Conan and Ninja
+        run: pip install conan==2.30.0 ninja==1.13.0
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ matrix.os }}-${{ hashFiles('conanfile.py') }}
+      - name: Detect Conan profile
+        run: conan profile detect --exist-ok
+      - name: Install dependencies
+        run: >
+          conan install . --output-folder build/conan --build=missing
+          -s build_type=Debug -s compiler.cppstd=20 ${{ matrix.conan_settings }}
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  # Desktop app compile check (not a required status check yet). Ubuntu 26.04 and
+  # macOS Intel runner coverage is deferred until GitHub-hosted runners support them;
+  # see docs/development/branch-protection.md.
+  qt-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenGL dev headers
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          cache: true
+      - name: Install Conan and Ninja
+        run: pip install conan==2.30.0 ninja==1.13.0
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2/p
+          key: conan-qt-ubuntu-24.04-${{ hashFiles('conanfile.py') }}
+      - name: Detect Conan profile
+        run: conan profile detect --exist-ok
+      - name: Install dependencies
+        run: >
+          conan install . --output-folder build/conan --build=missing
+          -s build_type=Debug -s compiler.cppstd=20
+      - name: Configure with Qt required
+        run: cmake --preset linux-debug -DVOXMESH_REQUIRE_QT=ON
+      - name: Build
+        run: cmake --build --preset linux-debug

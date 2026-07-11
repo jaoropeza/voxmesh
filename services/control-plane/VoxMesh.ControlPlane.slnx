@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VoxMesh.ControlPlane.Api/VoxMesh.ControlPlane.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VoxMesh.ControlPlane.Api.Tests/VoxMesh.ControlPlane.Api.Tests.csproj" />
+  </Folder>
+</Solution>

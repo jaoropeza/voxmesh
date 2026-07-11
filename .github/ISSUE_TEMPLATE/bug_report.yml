@@ -1,0 +1,41 @@
+name: Bug report
+description: A defect in existing behavior
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Observed behavior, including exact error output where available.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and version
+      placeholder: "Windows 11 23H2, app 0.1.0 / ubuntu-24.04 CI runner"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / diagnostics
+      description: >
+        Structured logs or metrics only. Never paste audio content, transcript text,
+        participant names, or tokens.

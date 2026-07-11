@@ -1,0 +1,15 @@
+---
+description: C#/.NET standards for the VoxMesh control plane
+globs:
+  - "services/control-plane/**"
+  - "**/*.cs"
+---
+
+- .NET 10 LTS, ASP.NET Core, nullable reference types enabled, warnings as errors.
+- PostgreSQL is the source of truth; Redis only for ephemeral session state, locks, rate
+  limiting, caching, presence — never authoritative data.
+- EF Core for regular transactional operations; Dapper only where profiling shows a need.
+- gRPC for internal low-latency communication; REST for external administration APIs.
+- OIDC / OAuth 2.0 for identity; least-privilege scopes; tenant isolation in every query.
+- Audit-relevant operations (tenants, users, roles, retention, credentials) must write audit
+  records.
