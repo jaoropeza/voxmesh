@@ -1,0 +1,27 @@
+# Normalize line endings: LF in the repository, native on checkout where safe.
+* text=auto
+
+# Always LF (build scripts and tooling break with CRLF)
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.proto text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+CMakeLists.txt text eol=lf
+*.cmake text eol=lf
+
+# Always CRLF (Windows-only tooling)
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.sln text eol=crlf
+
+# Binary — never diff or normalize
+*.png binary
+*.ico binary
+*.icns binary
+*.wav binary
+*.flac binary
+*.mka binary
+*.opus binary
