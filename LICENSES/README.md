@@ -11,6 +11,8 @@ C++ quality standards (master prompt §26) and the Qt licensing ADR (ADR-0003).
 | Dependency | License | Where used | Notes |
 | --- | --- | --- | --- |
 | GoogleTest | BSD-3-Clause | C++ tests | via Conan |
+| nlohmann/json | MIT | audio-core config parsing | via Conan |
+| Google Benchmark | Apache-2.0 | C++ benchmarks | via Conan |
 | Qt 6 | LGPL-3.0 / Commercial | Desktop recorder | **Pending legal review — see ADR-0003** |
 
 Add a row whenever a dependency is introduced. SBOM generation in CI supplements, but does not

@@ -15,6 +15,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 option(VOXMESH_BUILD_TESTS "Build C++ unit tests" ON)
+option(VOXMESH_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(VOXMESH_REQUIRE_QT "Fail configuration when Qt 6 is not found (CI)" OFF)
 option(VOXMESH_WARNINGS_AS_ERRORS "Treat warnings as errors for project code" ON)
 
