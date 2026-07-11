@@ -19,7 +19,7 @@ jobs:
   buf:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Breaking-change detection needs a baseline. Until the contracts land on
       # main there is nothing to break, and `buf breaking` errors with "had no
       # .proto files". Gate it on main actually having a proto tree so the very
