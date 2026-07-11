@@ -35,4 +35,4 @@ struct SemanticVersion {
 // Version compiled into this build (from the CMake project version).
 [[nodiscard]] SemanticVersion projectVersion();
 
-}  // namespace voxmesh::core
+} // namespace voxmesh::core

@@ -40,8 +40,7 @@ TEST(VersionTest, OrdersNumericComponents)
     const auto low = SemanticVersion::parse("1.2.3").value();
     const auto high = SemanticVersion::parse("1.10.0").value();
     EXPECT_LT(low, high);
-    EXPECT_LT(SemanticVersion::parse("0.9.9").value(),
-              SemanticVersion::parse("1.0.0").value());
+    EXPECT_LT(SemanticVersion::parse("0.9.9").value(), SemanticVersion::parse("1.0.0").value());
 }
 
 TEST(VersionTest, ReleaseOutranksPrerelease)
@@ -68,5 +67,5 @@ TEST(VersionTest, ProjectVersionIsValid)
     EXPECT_EQ(v, SemanticVersion::parse(v.toString()).value());
 }
 
-}  // namespace
-}  // namespace voxmesh::core
+} // namespace
+} // namespace voxmesh::core

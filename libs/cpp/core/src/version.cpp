@@ -36,8 +36,7 @@ bool isValidPrerelease(std::string_view text)
             continue;
         }
         previousWasDot = false;
-        const bool valid = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
-                           (c >= 'A' && c <= 'Z') || c == '-';
+        const bool valid = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-';
         if (!valid) {
             return false;
         }
@@ -45,7 +44,7 @@ bool isValidPrerelease(std::string_view text)
     return true;
 }
 
-}  // namespace
+} // namespace
 
 std::optional<SemanticVersion> SemanticVersion::parse(std::string_view text)
 {
@@ -77,8 +76,7 @@ std::optional<SemanticVersion> SemanticVersion::parse(std::string_view text)
 
 std::string SemanticVersion::toString() const
 {
-    std::string result = std::to_string(major) + '.' + std::to_string(minor) + '.' +
-                         std::to_string(patch);
+    std::string result = std::to_string(major) + '.' + std::to_string(minor) + '.' + std::to_string(patch);
     if (!prerelease.empty()) {
         result += '-';
         result += prerelease;
@@ -99,8 +97,7 @@ std::strong_ordering SemanticVersion::operator<=>(const SemanticVersion& other) 
     }
     // Release outranks prerelease of the same numeric version.
     if (prerelease.empty() != other.prerelease.empty()) {
-        return prerelease.empty() ? std::strong_ordering::greater
-                                  : std::strong_ordering::less;
+        return prerelease.empty() ? std::strong_ordering::greater : std::strong_ordering::less;
     }
     return prerelease.compare(other.prerelease) <=> 0;
 }
@@ -114,4 +111,4 @@ SemanticVersion projectVersion()
     return parsed.value_or(SemanticVersion{0, 0, 0, "invalid"});
 }
 
-}  // namespace voxmesh::core
+} // namespace voxmesh::core
