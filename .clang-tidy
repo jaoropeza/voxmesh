@@ -1,0 +1,21 @@
+---
+Checks: >
+  bugprone-*,
+  cert-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -misc-non-private-member-variables-in-classes,
+  -cppcoreguidelines-non-private-member-variables-in-classes
+WarningsAsErrors: 'bugprone-*,concurrency-*,cert-*'
+HeaderFilterRegex: '(libs|apps|platform)/.*\.(hpp|h)$'
+CheckOptions:
+  readability-function-cognitive-complexity.Threshold: '25'
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: 'true'
