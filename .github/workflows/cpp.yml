@@ -27,12 +27,20 @@ jobs:
         include:
           - os: ubuntu-22.04
             preset: linux-debug
+            conan_settings: ""
           - os: ubuntu-24.04
             preset: linux-debug
+            conan_settings: ""
+          # windows-latest has MinGW gcc on PATH, which `conan profile detect` can
+          # pick up while CMake's default generator compiles with MSVC — force the
+          # profile to MSVC (194 = the VS 2022 toolset on current runners).
           - os: windows-latest
             preset: windows-debug
+            conan_settings: >-
+              -s compiler=msvc -s compiler.version=194 -s compiler.runtime=dynamic
           - os: macos-15
             preset: macos-arm64-debug
+            conan_settings: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +56,7 @@ jobs:
       - name: Install dependencies
         run: >
           conan install . --output-folder build/conan --build=missing
-          -s build_type=Debug -s compiler.cppstd=20
+          -s build_type=Debug -s compiler.cppstd=20 ${{ matrix.conan_settings }}
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
       - name: Build
