@@ -1,3 +1,4 @@
 add_subdirectory(core)
-# Phase 1 adds: audio-core. Later: audio-dsp, media-container, streaming-client,
-# observability, security (master prompt §19).
+add_subdirectory(audio-core)
+# Later phases add: audio-dsp, media-container, streaming-client, observability,
+# security (master prompt §19).

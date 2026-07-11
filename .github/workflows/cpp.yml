@@ -34,10 +34,13 @@ jobs:
           # windows-latest has MinGW gcc on PATH, which `conan profile detect` can
           # pick up while CMake's default generator compiles with MSVC — force the
           # profile to MSVC (195 = the VS 2026 toolset on windows-latest; conan 2.30+ required for VS 2026).
+          # Dependency builds use Ninja: some recipes (e.g. benchmark) tool-require
+          # an older CMake that lacks the "Visual Studio 18 2026" generator.
           - os: windows-latest
             preset: windows-debug
             conan_settings: >-
               -s compiler=msvc -s compiler.version=195 -s compiler.runtime=dynamic
+              -c tools.cmake.cmaketoolchain:generator=Ninja
           - os: macos-15
             preset: macos-arm64-debug
             conan_settings: ""
