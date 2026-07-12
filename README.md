@@ -51,10 +51,10 @@ cmake --preset windows-debug -DCMAKE_PREFIX_PATH="C:/Qt/<version>/msvc2022_64"
 
 ### Running the desktop recorder
 
-After building, run the app with Qt's runtime on `PATH` (Windows):
+On Windows the build deploys the Qt runtime beside the executable (windeployqt runs as a
+post-build step), so the app starts straight from the build tree with no environment setup:
 
 ```powershell
-$env:PATH = "C:\Qt\<version>\msvc2022_64\bin;$env:PATH"
 .\build\windows-debug\apps\desktop-recorder\Debug\voxmesh-recorder.exe
 ```
 

@@ -39,6 +39,19 @@ endif()
 qt_add_executable(voxmesh-recorder
     src/main.cpp)
 
+# Deploy the Qt runtime beside the build-tree executable so it runs without
+# any PATH setup. Without this, the lone Qt6Core.dll copied for test discovery
+# makes Qt treat the output folder as its prefix and the platform plugin is
+# never found. (The MSI stages its own deployment; see packaging/windows.)
+if(WIN32)
+    add_custom_command(TARGET voxmesh-recorder POST_BUILD
+        COMMAND Qt6::windeployqt
+            --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+            --no-translations
+            "$<TARGET_FILE:voxmesh-recorder>"
+        COMMENT "windeployqt: staging Qt runtime beside voxmesh-recorder")
+endif()
+
 qt_add_qml_module(voxmesh-recorder
     URI VoxMesh.Recorder
     VERSION 1.0
