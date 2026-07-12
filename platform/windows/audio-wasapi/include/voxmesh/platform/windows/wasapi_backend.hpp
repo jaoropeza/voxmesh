@@ -7,10 +7,11 @@
 namespace voxmesh::platform::windows {
 
 // WASAPI implementation of the platform-neutral capture interfaces (master
-// prompt §6, ADR-0004). Shared-mode, event-driven capture with
-// AUTOCONVERTPCM, so any PCM/float format the audio-core requests is served
-// regardless of the device mix format. This slice (issue #10) covers device
-// enumeration and microphone capture; render-endpoint loopback is issue #11.
+// prompt §6, ADR-0004). Shared-mode capture with AUTOCONVERTPCM, so any
+// PCM/float format the audio-core requests is served regardless of the device
+// mix format. Capture endpoints (microphones, #10) are event-driven; render
+// endpoints (#11) are captured as system-output loopback, poll-driven, and by
+// WASAPI design produce packets only while the endpoint is rendering.
 //
 // No Windows headers leak through this interface — everything WASAPI lives in
 // the implementation files.

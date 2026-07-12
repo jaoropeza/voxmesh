@@ -3,12 +3,22 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstring>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <variant>
 #include <vector>
+
+#include <windows.h>
+
+#include <audioclient.h>
+#include <combaseapi.h>
+#include <mmdeviceapi.h>
+#include <wrl/client.h>
 
 namespace voxmesh::platform::windows {
 namespace {
@@ -91,7 +101,75 @@ TEST(WasapiBackendTest, EmptyDeviceIdYieldsDeviceNotFound)
     EXPECT_EQ(std::get<audio::CaptureError>(result), audio::CaptureError::DeviceNotFound);
 }
 
-TEST(WasapiBackendTest, RenderEndpointIsRejectedUntilLoopbackLands)
+// Keeps the shared-mode engine rendering (silence) on a device so its loopback
+// tap produces packets — without this, an idle endpoint emits nothing and the
+// loopback test would be non-deterministic.
+class SilenceRenderer {
+public:
+    explicit SilenceRenderer(std::string deviceId) : thread_([this, id = std::move(deviceId)] { run(id); }) {}
+
+    ~SilenceRenderer()
+    {
+        stop_.store(true);
+        thread_.join();
+    }
+
+    SilenceRenderer(const SilenceRenderer&) = delete;
+    SilenceRenderer& operator=(const SilenceRenderer&) = delete;
+    SilenceRenderer(SilenceRenderer&&) = delete;
+    SilenceRenderer& operator=(SilenceRenderer&&) = delete;
+
+private:
+    void run(const std::string& deviceId)
+    {
+        using Microsoft::WRL::ComPtr;
+        if (FAILED(::CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {
+            return;
+        }
+        {
+            ComPtr<IMMDeviceEnumerator> enumerator;
+            ComPtr<IMMDevice> device;
+            ComPtr<IAudioClient> client;
+            ComPtr<IAudioRenderClient> renderer;
+            std::wstring wideId(deviceId.begin(), deviceId.end()); // endpoint ids are ASCII
+            WAVEFORMATEX* mixFormat = nullptr;
+            const bool ready =
+                SUCCEEDED(
+                    ::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator))) &&
+                SUCCEEDED(enumerator->GetDevice(wideId.c_str(), &device)) &&
+                SUCCEEDED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                           reinterpret_cast<void**>(client.GetAddressOf()))) &&
+                SUCCEEDED(client->GetMixFormat(&mixFormat)) &&
+                SUCCEEDED(client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 1'000'000, 0, mixFormat, nullptr)) &&
+                SUCCEEDED(client->GetService(IID_PPV_ARGS(&renderer))) && SUCCEEDED(client->Start());
+            UINT32 bufferFrames = 0;
+            if (ready && SUCCEEDED(client->GetBufferSize(&bufferFrames))) {
+                while (!stop_.load()) {
+                    UINT32 padding = 0;
+                    if (FAILED(client->GetCurrentPadding(&padding))) {
+                        break;
+                    }
+                    const UINT32 available = bufferFrames - padding;
+                    BYTE* data = nullptr;
+                    if (available > 0 && SUCCEEDED(renderer->GetBuffer(available, &data))) {
+                        renderer->ReleaseBuffer(available, AUDCLNT_BUFFERFLAGS_SILENT);
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds{10});
+                }
+                client->Stop();
+            }
+            if (mixFormat != nullptr) {
+                ::CoTaskMemFree(mixFormat);
+            }
+        }
+        ::CoUninitialize();
+    }
+
+    std::atomic<bool> stop_{false};
+    std::thread thread_;
+};
+
+TEST(WasapiBackendTest, LoopbackCapturesSystemOutputWhileRendering)
 {
     WasapiCaptureBackend backend;
     auto devices = backend.createDeviceEnumerator()->devices();
@@ -99,10 +177,41 @@ TEST(WasapiBackendTest, RenderEndpointIsRejectedUntilLoopbackLands)
     if (devices.empty()) {
         GTEST_SKIP() << "no render endpoints on this machine";
     }
+
+    auto config = configFor(devices.front().id);
+    config.track = audio::TrackKind::SystemOutput;
+    config.channels = audio::ChannelCount{2}; // preserve source layout (spec §7)
+
     CollectingSink sink;
-    const auto result = backend.startCapture(configFor(devices.front().id), sink);
-    ASSERT_TRUE(std::holds_alternative<audio::CaptureError>(result));
-    EXPECT_EQ(std::get<audio::CaptureError>(result), audio::CaptureError::FormatNotSupported);
+    auto result = backend.startCapture(config, sink);
+    ASSERT_TRUE(std::holds_alternative<std::unique_ptr<audio::IAudioCaptureStream>>(result))
+        << "CaptureError " << static_cast<int>(std::get<audio::CaptureError>(result));
+    auto& stream = *std::get<std::unique_ptr<audio::IAudioCaptureStream>>(result);
+
+    {
+        SilenceRenderer renderer(devices.front().id);
+        std::this_thread::sleep_for(std::chrono::milliseconds{400});
+    }
+    stream.stop();
+
+    const auto stats = stream.stats();
+    EXPECT_GT(stats.framesEmitted, 0u);
+    EXPECT_EQ(stats.framesDropped, 0u);
+
+    const auto frames = sink.snapshot();
+    ASSERT_FALSE(frames.empty());
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        const audio::AudioFrame& frame = frames[i];
+        EXPECT_EQ(frame.sequence.value, i);
+        EXPECT_EQ(frame.track, audio::TrackKind::SystemOutput);
+        EXPECT_EQ(frame.channels, audio::ChannelCount{2});
+        EXPECT_EQ(frame.format, audio::SampleFormat::PcmS16Le);
+        EXPECT_GT(frame.payload.size(), 0u);
+        EXPECT_EQ(frame.payload.size() % 4, 0u); // whole stereo s16 sample pairs
+        if (i > 0) {
+            EXPECT_GE(frame.timestamp.value, frames[i - 1].timestamp.value);
+        }
+    }
 }
 
 TEST(WasapiBackendTest, CapturesSequencedTimestampedFramesFromRealMicrophone)
