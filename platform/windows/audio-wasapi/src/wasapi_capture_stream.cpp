@@ -136,12 +136,11 @@ void WasapiCaptureStream::run(std::atomic<int>& initResult, HANDLE initDone) noe
         return;
     }
 
-    // Render endpoints need loopback capture — issue #11, not this slice.
+    // Render endpoints are captured as loopback (issue #11).
     ComPtr<IMMEndpoint> endpoint;
     EDataFlow flow = eCapture;
-    if (SUCCEEDED(device.As(&endpoint)) && SUCCEEDED(endpoint->GetDataFlow(&flow)) && flow == eRender) {
-        failInit(audio::CaptureError::FormatNotSupported);
-        return;
+    if (SUCCEEDED(device.As(&endpoint)) && SUCCEEDED(endpoint->GetDataFlow(&flow))) {
+        loopback_ = flow == eRender;
     }
 
     ComPtr<IAudioClient> audioClient;
@@ -154,24 +153,28 @@ void WasapiCaptureStream::run(std::atomic<int>& initResult, HANDLE initDone) noe
 
     // AUTOCONVERTPCM lets WASAPI serve the requested format regardless of the
     // device mix format; frameDuration only sizes the shared buffer (4x).
+    // Loopback clients never get EVENTCALLBACK (their events do not fire
+    // without a companion render stream) — the loop polls instead.
     const WAVEFORMATEX format = makeFormat(config_);
     const REFERENCE_TIME bufferDuration = static_cast<REFERENCE_TIME>(config_.frameDuration.count()) * 10'000 * 4;
-    hr = audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                 AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
-                                     AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-                                 bufferDuration, 0, &format, nullptr);
+    DWORD streamFlags = AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+    streamFlags |= loopback_ ? AUDCLNT_STREAMFLAGS_LOOPBACK : AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+    hr = audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, streamFlags, bufferDuration, 0, &format, nullptr);
     if (FAILED(hr)) {
         failInit(mapInitializeError(hr));
         return;
     }
 
-    HANDLE dataEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (dataEvent == nullptr || FAILED(audioClient->SetEventHandle(dataEvent))) {
-        if (dataEvent != nullptr) {
-            ::CloseHandle(dataEvent);
+    HANDLE dataEvent = nullptr;
+    if (!loopback_) {
+        dataEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (dataEvent == nullptr || FAILED(audioClient->SetEventHandle(dataEvent))) {
+            if (dataEvent != nullptr) {
+                ::CloseHandle(dataEvent);
+            }
+            failInit(audio::CaptureError::BackendFailure);
+            return;
         }
-        failInit(audio::CaptureError::BackendFailure);
-        return;
     }
 
     ComPtr<IAudioCaptureClient> captureClient;
@@ -195,7 +198,9 @@ void WasapiCaptureStream::run(std::atomic<int>& initResult, HANDLE initDone) noe
     if (mmcss != nullptr) {
         ::AvRevertMmThreadCharacteristics(mmcss);
     }
-    ::CloseHandle(dataEvent);
+    if (dataEvent != nullptr) {
+        ::CloseHandle(dataEvent);
+    }
 }
 
 void WasapiCaptureStream::captureLoop(IAudioClient* /*audioClient*/, IAudioCaptureClient* captureClient,
@@ -204,9 +209,13 @@ void WasapiCaptureStream::captureLoop(IAudioClient* /*audioClient*/, IAudioCaptu
     const std::size_t blockAlign =
         audio::bytesPerSample(config_.format) * static_cast<std::size_t>(config_.channels.value);
 
+    // Event-driven for capture endpoints; poll-driven for loopback (10 ms is
+    // comfortably inside the 4x-frameDuration shared buffer).
     HANDLE waitHandles[2] = {stopEvent_, dataEvent};
+    const DWORD handleCount = dataEvent != nullptr ? 2 : 1;
+    const DWORD timeoutMs = dataEvent != nullptr ? 2000 : 10;
     for (;;) {
-        const DWORD wait = ::WaitForMultipleObjects(2, waitHandles, FALSE, 2000);
+        const DWORD wait = ::WaitForMultipleObjects(handleCount, waitHandles, FALSE, timeoutMs);
         if (wait == WAIT_OBJECT_0 || wait == WAIT_FAILED) {
             return; // stop requested (or the wait itself broke)
         }

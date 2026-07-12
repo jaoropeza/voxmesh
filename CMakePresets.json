@@ -15,12 +15,14 @@
       "inherits": "base",
       "displayName": "Windows x64 Debug (default VS generator)",
       "architecture": { "value": "x64", "strategy": "set" },
+      "cacheVariables": { "CMAKE_CONFIGURATION_TYPES": "Debug" },
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
     },
     {
       "name": "windows-release",
       "inherits": "windows-debug",
-      "displayName": "Windows x64 Release"
+      "displayName": "Windows x64 Release",
+      "cacheVariables": { "CMAKE_CONFIGURATION_TYPES": "Release" }
     },
     {
       "name": "linux-debug",
