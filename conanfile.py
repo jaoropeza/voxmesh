@@ -59,6 +59,7 @@ class VoxMeshConan(ConanFile):
         "ffmpeg/*:with_vdpau": False,
         "ffmpeg/*:with_vulkan": False,
         "ffmpeg/*:with_xcb": False,
+        "ffmpeg/*:with_xlib": False,
         "ffmpeg/*:with_appkit": False,
         "ffmpeg/*:with_avfoundation": False,
         "ffmpeg/*:with_coreimage": False,
