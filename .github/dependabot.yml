@@ -15,5 +15,10 @@ updates:
     directory: /services/ai/stt
     schedule:
       interval: weekly
+    ignore:
+      # pydantic pins pydantic-core 1:1 (==X.Y.Z); bumping core independently is
+      # always ResolutionImpossible. It updates together with pydantic instead.
+      - dependency-name: pydantic-core
+      - dependency-name: pydantic_core
 # Add ecosystems as they land: npm (apps/web, Phase 3+). Conan is not supported by
 # Dependabot; C++ dependency bumps are manual and tracked via the license inventory.
