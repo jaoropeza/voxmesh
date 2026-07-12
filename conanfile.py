@@ -50,6 +50,20 @@ class VoxMeshConan(ConanFile):
         "ffmpeg/*:with_ssl": False,
         "ffmpeg/*:with_vorbis": False,
         "ffmpeg/*:with_zlib": True,
+        # Platform-specific device/hwaccel integrations conflict with
+        # avdevice=False (e.g. "with_libalsa requires avdevice"); pattern-scoped
+        # options that don't exist on a platform are ignored.
+        "ffmpeg/*:with_libalsa": False,
+        "ffmpeg/*:with_pulse": False,
+        "ffmpeg/*:with_vaapi": False,
+        "ffmpeg/*:with_vdpau": False,
+        "ffmpeg/*:with_vulkan": False,
+        "ffmpeg/*:with_xcb": False,
+        "ffmpeg/*:with_appkit": False,
+        "ffmpeg/*:with_avfoundation": False,
+        "ffmpeg/*:with_coreimage": False,
+        "ffmpeg/*:with_audiotoolbox": False,
+        "ffmpeg/*:with_videotoolbox": False,
     }
 
     def requirements(self):
