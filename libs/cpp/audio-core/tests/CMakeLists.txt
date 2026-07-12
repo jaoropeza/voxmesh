@@ -1,4 +1,5 @@
 add_executable(voxmesh-audio-core-tests
+    clock_sync_test.cpp
     config_test.cpp
     fake_backend_test.cpp
     ring_buffer_test.cpp
