@@ -34,7 +34,8 @@ Full details in [README.md](README.md). Quick reference:
 
 ```sh
 # C++ (needs CMake ≥3.28, Conan 2, C++20 compiler; Qt optional — app target skips without it)
-conan install . --output-folder build/conan --build=missing -s build_type=Debug
+conan install . --output-folder build/conan --build=missing -s build_type=Debug \
+  -s compiler.cppstd=20 -c:a tools.cmake.cmaketoolchain:generator=Ninja
 cmake --preset windows-debug && cmake --build --preset windows-debug
 ctest --preset windows-debug                    # all C++ tests
 ctest --preset windows-debug -R RingBufferTest  # single test filter (VersionTest, SessionTest, ...)

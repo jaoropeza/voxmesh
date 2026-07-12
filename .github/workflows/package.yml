@@ -1,0 +1,72 @@
+name: package
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Release build + MSI + silent install/uninstall smoke test (§29, ADR-0018).
+  # The MSI is uploaded unsigned; signing runs only in the protected
+  # code-signing environment once it exists.
+  package-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Install Conan and Ninja
+        run: pip install conan==2.30.0 ninja==1.13.0
+      - name: Cache Conan packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.conan2/p
+          # Separate key from the Debug build-test cache: actions/cache never
+          # updates an existing key, so sharing one would rebuild Release
+          # dependencies every run.
+          key: conan-windows-release-${{ hashFiles('conanfile.py') }}
+      - name: Detect Conan profile
+        run: conan profile detect --exist-ok
+      - name: Install dependencies
+        run: >
+          conan install . --output-folder build/conan --build=missing
+          -s build_type=Release -s compiler.cppstd=20
+          -s compiler=msvc -s compiler.version=195 -s compiler.runtime=dynamic
+          -c:a tools.cmake.cmaketoolchain:generator=Ninja
+      - name: Configure
+        run: >
+          cmake --preset windows-release -DVOXMESH_REQUIRE_QT=ON
+          -DVOXMESH_BUILD_TESTS=OFF -DVOXMESH_BUILD_BENCHMARKS=OFF
+      - name: Build
+        run: cmake --build --preset windows-release
+      # WiX pinned to v6: v7 gates usage behind the Open Source Maintenance
+      # Fee EULA — a commercial-use decision pending legal review (see
+      # packaging/windows/README.md).
+      - name: Install WiX
+        run: dotnet tool install --global wix --version 6.0.2
+      - name: Build MSI
+        run: pwsh packaging/windows/build-msi.ps1 -Config Release -QtBinDir "$env:QT_ROOT_DIR/bin"
+      - name: Silent install / uninstall smoke test
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem build/packaging/windows/release/*.msi | Select-Object -First 1
+          $p = Start-Process msiexec -ArgumentList "/i", "`"$($msi.FullName)`"", "/qn", "/l*v", "install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; throw "silent install failed: $($p.ExitCode)" }
+          $exe = "C:\Program Files\VoxMesh Recorder\voxmesh-recorder.exe"
+          if (-not (Test-Path $exe)) { throw "exe missing after install" }
+          $p = Start-Process msiexec -ArgumentList "/x", "`"$($msi.FullName)`"", "/qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "silent uninstall failed: $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "exe still present after uninstall" }
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxmesh-recorder-msi-unsigned
+          path: build/packaging/windows/release/*.msi
