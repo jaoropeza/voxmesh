@@ -98,6 +98,10 @@ bool RecorderController::start()
         fail(tr("No capture devices available."));
         return false;
     }
+    // Clear stale errors first: startSttStreaming() may surface a non-fatal
+    // warning that must survive a successful start.
+    lastError_.clear();
+    emit errorChanged();
     if (!createWriter()) {
         return false;
     }
@@ -114,8 +118,6 @@ bool RecorderController::start()
         (void)session_.handle(audio::SessionEvent::Reset);
         return false;
     }
-    lastError_.clear();
-    emit errorChanged();
     statsTimer_.start();
     return true;
 }
