@@ -214,6 +214,53 @@ TEST(WasapiBackendTest, LoopbackCapturesSystemOutputWhileRendering)
     }
 }
 
+// §9 / issue #29: an idle render endpoint produces no WASAPI packets, but the
+// loopback track must still be continuous explicit silence — a recording made
+// while nothing plays must not yield an empty system-output track.
+TEST(WasapiBackendTest, LoopbackSynthesizesSilenceWhileDeviceIsIdle)
+{
+    WasapiCaptureBackend backend;
+    auto devices = backend.createDeviceEnumerator()->devices();
+    std::erase_if(devices, [](const audio::AudioDeviceInfo& d) { return d.kind != audio::DeviceKind::RenderOutput; });
+    if (devices.empty()) {
+        GTEST_SKIP() << "no render endpoints on this machine";
+    }
+
+    auto config = configFor(devices.front().id);
+    config.track = audio::TrackKind::SystemOutput;
+    config.channels = audio::ChannelCount{2};
+
+    CollectingSink sink;
+    auto result = backend.startCapture(config, sink);
+    ASSERT_TRUE(std::holds_alternative<std::unique_ptr<audio::IAudioCaptureStream>>(result))
+        << "CaptureError " << static_cast<int>(std::get<audio::CaptureError>(result));
+    auto& stream = *std::get<std::unique_ptr<audio::IAudioCaptureStream>>(result);
+
+    // Deliberately no SilenceRenderer: the endpoint stays idle.
+    std::this_thread::sleep_for(std::chrono::milliseconds{500});
+    stream.stop();
+
+    // ~50 frames of 10 ms are due in 500 ms; require at least half to allow
+    // for scheduling slack.
+    const auto frames = sink.snapshot();
+    ASSERT_GE(frames.size(), 25u);
+    const std::size_t expectedBytes = std::size_t{480} * 2 * 2; // 10 ms stereo s16 at 48 kHz
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        const audio::AudioFrame& frame = frames[i];
+        EXPECT_EQ(frame.sequence.value, i);
+        EXPECT_EQ(frame.payload.size(), expectedBytes);
+        // Synthesized frames are explicit silence...
+        EXPECT_TRUE(
+            std::all_of(frame.payload.begin(), frame.payload.end(), [](std::byte b) { return b == std::byte{0}; }));
+        // ...on a continuous timeline, not flagged as loss.
+        EXPECT_FALSE(frame.discontinuity);
+        if (i > 0) {
+            const auto delta = frame.timestamp.value - frames[i - 1].timestamp.value;
+            EXPECT_EQ(delta.count(), 10'000'000);
+        }
+    }
+}
+
 TEST(WasapiBackendTest, CapturesSequencedTimestampedFramesFromRealMicrophone)
 {
     const auto devices = captureDevices();
