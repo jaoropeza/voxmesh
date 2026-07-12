@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package voxmesh.stt.v1;
+
+import "voxmesh/media/v1/audio_frame.proto";
+import "voxmesh/transcript/v1/transcript_segment.proto";
+
+// Streaming speech-to-text session (master prompt §12, ADR-0008): the client
+// streams derived STT audio (16 kHz mono pcm_s16le, 100 ms frames per §7) and
+// receives revisioned transcript segments back on the same bidirectional
+// stream. Partial revisions REPLACE earlier revisions of the same segment_id
+// (see voxmesh.transcript.v1.TranscriptSegment).
+//
+// Phase 2 pairs this with a mock server returning scripted partials; the real
+// streaming STT worker (Phase 6) implements the same contract.
+service SttStreamService {
+  rpc StreamTranscription(stream StreamTranscriptionRequest) returns (stream StreamTranscriptionResponse);
+}
+
+message StreamTranscriptionRequest {
+  // Later revisions may add session-control payloads (start/end-of-utterance
+  // hints, language switches) as new fields alongside the frame.
+  voxmesh.media.v1.AudioFrame frame = 1;
+}
+
+message StreamTranscriptionResponse {
+  voxmesh.transcript.v1.TranscriptSegment segment = 1;
+}
