@@ -13,7 +13,7 @@ jobs:
   format:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install clang-format
         run: pipx install clang-format==19.1.7
       - name: Check formatting
@@ -46,11 +46,11 @@ jobs:
             conan_settings: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Conan and Ninja
         run: pip install conan==2.30.0 ninja==1.13.0
       - name: Cache Conan packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.conan2/p
           key: conan-${{ matrix.os }}-${{ hashFiles('conanfile.py') }}
@@ -73,7 +73,7 @@ jobs:
   qt-build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install OpenGL dev headers
         run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev
       - name: Install Qt
@@ -84,7 +84,7 @@ jobs:
       - name: Install Conan and Ninja
         run: pip install conan==2.30.0 ninja==1.13.0
       - name: Cache Conan packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.conan2/p
           key: conan-qt-ubuntu-24.04-${{ hashFiles('conanfile.py') }}
