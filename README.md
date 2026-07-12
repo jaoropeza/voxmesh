@@ -32,11 +32,37 @@ optional — the desktop app target is skipped when Qt is not found.
 ```sh
 pip install conan
 conan profile detect --exist-ok
-conan install . --output-folder build/conan --build=missing -s build_type=Debug
+# cppstd is required (gRPC needs >=17); -c:a applies the Ninja generator to
+# dependency builds in both contexts (some recipes tool-require an older CMake).
+conan install . --output-folder build/conan --build=missing \
+  -s build_type=Debug -s compiler.cppstd=20 \
+  -c:a tools.cmake.cmaketoolchain:generator=Ninja
 cmake --preset windows-debug        # or linux-debug / macos-arm64-debug
 cmake --build --preset windows-debug
 ctest --preset windows-debug
 ```
+
+The first dependency install compiles FFmpeg and gRPC from source (minutes); later runs hit
+the Conan cache. On Windows with a non-default Qt location, pass it at configure time:
+
+```sh
+cmake --preset windows-debug -DCMAKE_PREFIX_PATH="C:/Qt/<version>/msvc2022_64"
+```
+
+### Running the desktop recorder
+
+After building, run the app with Qt's runtime on `PATH` (Windows):
+
+```powershell
+$env:PATH = "C:\Qt\<version>\msvc2022_64\bin;$env:PATH"
+.\build\windows-debug\apps\desktop-recorder\Debug\voxmesh-recorder.exe
+```
+
+The app hosts a mock speech-to-text server in-process: press **Record** and the live
+transcript panel fills with scripted partial results while the recording is written to
+`Music\VoxMesh` as FLAC (one track) or Matroska (mic + system output). Alternatively install
+the MSI (`packaging/windows/`, or the `voxmesh-recorder-msi-unsigned` CI artifact) — it
+deploys the Qt and VC++ runtimes app-locally, so no `PATH` setup is needed.
 
 ### Control plane (.NET)
 

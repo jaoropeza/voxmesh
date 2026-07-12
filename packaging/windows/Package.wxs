@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VoxMesh Recorder MSI (issue #16, master prompt §29, ADR-0018).
+
+  Built by build-msi.ps1, which stages the app with windeployqt and passes:
+    -d StagingDir=<staged app payload>   -d ProductVersion=<x.y.z>
+
+  The UpgradeCode is permanent — never change it, or upgrades break.
+  MajorUpgrade gives replace-on-upgrade semantics; downgrades are refused.
+  Unsigned until the protected code-signing environment exists (ADR-0018).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="VoxMesh Recorder"
+           Manufacturer="VoxMesh"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="3cfdc27c-1c33-4db0-bb0c-9727a398ffab"
+           Language="1033"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Everything windeployqt staged: exe, Qt runtime, QML modules, plugins. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="VoxMesh Recorder">
+        <Files Include="$(var.StagingDir)\**" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Start-menu shortcut. HKMU resolves per install scope. -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="VoxMeshRecorderShortcut"
+                  Name="VoxMesh Recorder"
+                  Description="Meeting recording with live transcription"
+                  Target="[INSTALLFOLDER]voxmesh-recorder.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKMU"
+                       Key="Software\VoxMesh\Recorder"
+                       Name="Installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Package>
+</Wix>
