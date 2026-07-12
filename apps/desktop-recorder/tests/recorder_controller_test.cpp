@@ -5,8 +5,11 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 
 #include <chrono>
+#include <memory>
 #include <thread>
 
 namespace voxmesh::app {
@@ -29,99 +32,168 @@ bool waitForFrames(const RecorderController& controller, quint64 atLeast,
     return true;
 }
 
-TEST(RecorderControllerTest, RefreshListsFakeDevicesAndSelectsDefaults)
+// Every start() opens a recording file, so tests point the controller at a
+// per-test temp directory instead of the user's real recordings folder.
+class RecorderControllerTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        directory_ = QDir::temp().filePath(QStringLiteral("voxmesh-recorder-%1").arg(info->name()));
+        QDir(directory_).removeRecursively();
+        controller_ = std::make_unique<RecorderController>(backend_);
+        controller_->setOutputDirectory(directory_);
+        controller_->refreshDevices();
+    }
+
+    void TearDown() override
+    {
+        controller_.reset();
+        QDir(directory_).removeRecursively();
+    }
+
+    [[nodiscard]] QStringList recordedFiles() const { return QDir(directory_).entryList(QDir::Files, QDir::Name); }
+
+    FakeCaptureBackend backend_;
+    std::unique_ptr<RecorderController> controller_;
+    QString directory_;
+};
+
+TEST_F(RecorderControllerTest, RefreshListsFakeDevicesAndSelectsDefaults)
 {
-    FakeCaptureBackend backend;
-    RecorderController controller(backend);
-
-    controller.refreshDevices();
-
-    ASSERT_EQ(controller.microphoneNames().size(), 1);
-    ASSERT_EQ(controller.systemOutputNames().size(), 1);
-    EXPECT_EQ(controller.selectedMicrophone(), 0);
-    EXPECT_EQ(controller.selectedSystemOutput(), 0);
-    EXPECT_TRUE(controller.isIdle());
+    ASSERT_EQ(controller_->microphoneNames().size(), 1);
+    ASSERT_EQ(controller_->systemOutputNames().size(), 1);
+    EXPECT_EQ(controller_->selectedMicrophone(), 0);
+    EXPECT_EQ(controller_->selectedSystemOutput(), 0);
+    EXPECT_TRUE(controller_->isIdle());
 }
 
-TEST(RecorderControllerTest, StartCapturesAndCountsAlignedFrames)
+TEST_F(RecorderControllerTest, StartCapturesAndCountsAlignedFrames)
 {
-    FakeCaptureBackend backend;
-    RecorderController controller(backend);
-    controller.refreshDevices();
-
-    ASSERT_TRUE(controller.start());
-    EXPECT_TRUE(controller.isRecording());
-    EXPECT_FALSE(controller.isIdle());
+    ASSERT_TRUE(controller_->start());
+    EXPECT_TRUE(controller_->isRecording());
+    EXPECT_FALSE(controller_->isIdle());
 
     // The system-output stream was started last; drive it deterministically.
-    backend.lastStream()->emitFrames(25);
-    EXPECT_TRUE(waitForFrames(controller, 25));
-    EXPECT_EQ(controller.framesDropped(), 0u);
+    backend_.lastStream()->emitFrames(25);
+    EXPECT_TRUE(waitForFrames(*controller_, 25));
+    EXPECT_EQ(controller_->framesDropped(), 0u);
 
-    ASSERT_TRUE(controller.stop());
-    EXPECT_TRUE(controller.isIdle());
+    ASSERT_TRUE(controller_->stop());
+    EXPECT_TRUE(controller_->isIdle());
 }
 
-TEST(RecorderControllerTest, TransportFollowsSessionStateMachine)
+TEST_F(RecorderControllerTest, TransportFollowsSessionStateMachine)
 {
-    FakeCaptureBackend backend;
-    RecorderController controller(backend);
-    controller.refreshDevices();
+    EXPECT_FALSE(controller_->pause());  // illegal from Idle
+    EXPECT_FALSE(controller_->resume()); // illegal from Idle
+    EXPECT_FALSE(controller_->stop());   // illegal from Idle
 
-    EXPECT_FALSE(controller.pause());  // illegal from Idle
-    EXPECT_FALSE(controller.resume()); // illegal from Idle
-    EXPECT_FALSE(controller.stop());   // illegal from Idle
+    ASSERT_TRUE(controller_->start());
+    EXPECT_FALSE(controller_->start()); // already recording
 
-    ASSERT_TRUE(controller.start());
-    EXPECT_FALSE(controller.start()); // already recording
+    ASSERT_TRUE(controller_->pause());
+    EXPECT_TRUE(controller_->isPaused());
+    EXPECT_FALSE(controller_->pause()); // already paused
 
-    ASSERT_TRUE(controller.pause());
-    EXPECT_TRUE(controller.isPaused());
-    EXPECT_FALSE(controller.pause()); // already paused
+    ASSERT_TRUE(controller_->resume());
+    EXPECT_TRUE(controller_->isRecording());
 
-    ASSERT_TRUE(controller.resume());
-    EXPECT_TRUE(controller.isRecording());
-
-    ASSERT_TRUE(controller.stop());
-    EXPECT_TRUE(controller.isIdle());
+    ASSERT_TRUE(controller_->stop());
+    EXPECT_TRUE(controller_->isIdle());
 
     // A full second cycle works after Reset.
-    ASSERT_TRUE(controller.start());
-    ASSERT_TRUE(controller.stop());
+    ASSERT_TRUE(controller_->start());
+    ASSERT_TRUE(controller_->stop());
 }
 
-TEST(RecorderControllerTest, PauseReleasesStreamsResumeOpensFreshOnes)
+TEST_F(RecorderControllerTest, PauseReleasesStreamsResumeOpensFreshOnes)
 {
-    FakeCaptureBackend backend;
-    RecorderController controller(backend);
-    controller.refreshDevices();
+    ASSERT_TRUE(controller_->start());
+    auto* firstStream = backend_.lastStream();
+    backend_.lastStream()->emitFrames(5);
+    ASSERT_TRUE(waitForFrames(*controller_, 5));
 
-    ASSERT_TRUE(controller.start());
-    auto* firstStream = backend.lastStream();
-    backend.lastStream()->emitFrames(5);
-    ASSERT_TRUE(waitForFrames(controller, 5));
-
-    ASSERT_TRUE(controller.pause());
+    ASSERT_TRUE(controller_->pause());
     EXPECT_TRUE(firstStream != nullptr);
 
-    ASSERT_TRUE(controller.resume());
-    EXPECT_NE(backend.lastStream(), nullptr);
-    backend.lastStream()->emitFrames(5);
-    EXPECT_TRUE(waitForFrames(controller, 10));
+    ASSERT_TRUE(controller_->resume());
+    EXPECT_NE(backend_.lastStream(), nullptr);
+    backend_.lastStream()->emitFrames(5);
+    EXPECT_TRUE(waitForFrames(*controller_, 10));
 
-    ASSERT_TRUE(controller.stop());
+    ASSERT_TRUE(controller_->stop());
 }
 
-TEST(RecorderControllerTest, SelectionRejectsOutOfRangeIndices)
+TEST_F(RecorderControllerTest, SelectionRejectsOutOfRangeIndices)
 {
-    FakeCaptureBackend backend;
-    RecorderController controller(backend);
-    controller.refreshDevices();
+    controller_->setSelectedMicrophone(5);
+    EXPECT_EQ(controller_->selectedMicrophone(), 0);
+    controller_->setSelectedMicrophone(-1);
+    EXPECT_EQ(controller_->selectedMicrophone(), -1);
+}
 
-    controller.setSelectedMicrophone(5);
-    EXPECT_EQ(controller.selectedMicrophone(), 0);
-    controller.setSelectedMicrophone(-1);
-    EXPECT_EQ(controller.selectedMicrophone(), -1);
+TEST_F(RecorderControllerTest, StopFinalizesMultiTrackMatroskaRecording)
+{
+    ASSERT_TRUE(controller_->start());
+    backend_.lastStream()->emitFrames(25);
+    ASSERT_TRUE(waitForFrames(*controller_, 25));
+    ASSERT_TRUE(controller_->stop());
+
+    // Both fake devices were selected -> one Matroska file, atomically final:
+    // no .partial sibling left behind (§11).
+    const QStringList files = recordedFiles();
+    ASSERT_EQ(files.size(), 1) << files.join(", ").toStdString();
+    EXPECT_TRUE(files.first().endsWith(QStringLiteral(".mka")));
+    EXPECT_EQ(controller_->lastRecordingFile(), QDir(directory_).filePath(files.first()));
+    EXPECT_GT(QFile(controller_->lastRecordingFile()).size(), 0);
+    EXPECT_TRUE(controller_->lastError().isEmpty());
+}
+
+TEST_F(RecorderControllerTest, SingleTrackRecordingIsFlacAndSurvivesPause)
+{
+    controller_->setSelectedSystemOutput(-1); // microphone only
+
+    ASSERT_TRUE(controller_->start());
+    backend_.lastStream()->emitFrames(10);
+    ASSERT_TRUE(waitForFrames(*controller_, 10));
+
+    ASSERT_TRUE(controller_->pause());
+    ASSERT_TRUE(controller_->resume());
+    backend_.lastStream()->emitFrames(10);
+    ASSERT_TRUE(waitForFrames(*controller_, 20));
+    ASSERT_TRUE(controller_->stop());
+
+    const QStringList files = recordedFiles();
+    ASSERT_EQ(files.size(), 1) << files.join(", ").toStdString();
+    EXPECT_TRUE(files.first().endsWith(QStringLiteral(".flac")));
+    EXPECT_GT(QFile(QDir(directory_).filePath(files.first())).size(), 0);
+}
+
+TEST_F(RecorderControllerTest, ConsecutiveRecordingsGetDistinctFiles)
+{
+    ASSERT_TRUE(controller_->start());
+    backend_.lastStream()->emitFrames(5);
+    ASSERT_TRUE(waitForFrames(*controller_, 5));
+    ASSERT_TRUE(controller_->stop());
+
+    ASSERT_TRUE(controller_->start());
+    backend_.lastStream()->emitFrames(5);
+    ASSERT_TRUE(waitForFrames(*controller_, 10));
+    ASSERT_TRUE(controller_->stop());
+
+    EXPECT_EQ(recordedFiles().size(), 2);
+}
+
+TEST_F(RecorderControllerTest, StopWithoutCapturedAudioSavesNothing)
+{
+    ASSERT_TRUE(controller_->start());
+    ASSERT_TRUE(controller_->stop()); // no frames were ever emitted
+
+    EXPECT_TRUE(recordedFiles().isEmpty());
+    EXPECT_TRUE(controller_->lastRecordingFile().isEmpty());
+    EXPECT_FALSE(controller_->lastError().isEmpty()); // "nothing was saved" surfaced
+    EXPECT_TRUE(controller_->isIdle());
 }
 
 } // namespace

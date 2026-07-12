@@ -137,12 +137,21 @@ ApplicationWindow {
       Layout.fillWidth: true
     }
 
+    Label {
+      text: qsTr("Saved: %1").arg(recorder.lastRecordingFile)
+      visible: recorder.lastRecordingFile.length > 0
+      wrapMode: Text.WrapAnywhere
+      Layout.fillWidth: true
+    }
+
     Item { Layout.fillHeight: true }
 
     Label {
-      text: qsTr("Capture only — recording to disk arrives with the writer slice.")
+      text: qsTr("Recordings folder: %1").arg(recorder.outputDirectory)
       opacity: 0.5
       font.pixelSize: 11
+      elide: Text.ElideMiddle
+      Layout.fillWidth: true
     }
   }
 

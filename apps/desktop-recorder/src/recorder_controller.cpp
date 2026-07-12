@@ -1,7 +1,16 @@
 #include "recorder_controller.hpp"
 
+#include "voxmesh/media/recording_writer.hpp"
+
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QStandardPaths>
+
 #include <chrono>
+#include <filesystem>
 #include <utility>
+#include <variant>
 
 namespace voxmesh::app {
 
@@ -33,8 +42,10 @@ RecorderController::RecorderController(audio::IAudioCaptureBackend& backend, QOb
     : QObject(parent), backend_(&backend),
       session_([this](audio::SessionState, audio::SessionState, audio::SessionEvent) { emit sessionStateChanged(); })
 {
+    const QString music = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+    outputDirectory_ = QDir(music.isEmpty() ? QDir::homePath() : music).filePath(QStringLiteral("VoxMesh"));
     statsTimer_.setInterval(kStatsIntervalMs);
-    connect(&statsTimer_, &QTimer::timeout, this, &RecorderController::statsChanged);
+    connect(&statsTimer_, &QTimer::timeout, this, &RecorderController::onStatsTick);
     drainThread_ = std::thread(&RecorderController::drainLoop, this);
 }
 
@@ -84,11 +95,16 @@ bool RecorderController::start()
         fail(tr("No capture devices available."));
         return false;
     }
+    if (!createWriter()) {
+        return false;
+    }
     if (!session_.handle(audio::SessionEvent::Start)) {
+        discardWriter();
         return false;
     }
     if (!startStreams()) {
         stopStreams();
+        discardWriter();
         (void)session_.handle(audio::SessionEvent::Fault);
         (void)session_.handle(audio::SessionEvent::Reset);
         return false;
@@ -104,8 +120,9 @@ bool RecorderController::pause()
     if (!session_.handle(audio::SessionEvent::Pause)) {
         return false;
     }
-    // Pause releases the devices; resume opens fresh streams and timelines, so
-    // the pause span is a deliberate cut, not synthesized silence.
+    // Pause releases the devices; resume opens fresh streams and timelines.
+    // The writer stays open and stamps by accumulated samples, so the paused
+    // span is spliced out of the file, not recorded as silence.
     stopStreams();
     return true;
 }
@@ -127,10 +144,40 @@ bool RecorderController::stop()
     if (!session_.handle(audio::SessionEvent::Stop)) {
         return false;
     }
-    stopStreams();
+    stopStreams(); // stops producers and drains the remainder into the writer
     statsTimer_.stop();
-    // No writer to finalize yet (#13): completion is immediate, and the
-    // session returns to Idle so a new recording can start.
+
+    QString savedFile;
+    QString finalizeError;
+    {
+        const std::lock_guard<std::mutex> lock(pipelineMutex_);
+        if (writer_) {
+            if (writerFailed_.load(std::memory_order_relaxed)) {
+                // Mid-recording write failure already surfaced; the partial
+                // file stays on disk for recovery (§11).
+                finalizeError = tr("Recording was interrupted by a write failure; a partial file was kept.");
+            } else if (writer_->stats().framesWritten == 0) {
+                // Nothing was captured. An empty container is not a recording
+                // (a packet-less Matroska cannot even be reopened), so discard
+                // it explicitly rather than pretend something was saved.
+                writer_->abort();
+                finalizeError = tr("No audio was captured; nothing was saved.");
+            } else if (writer_->finalize()) {
+                savedFile = pendingOutputFile_;
+            } else {
+                finalizeError = tr("Recording could not be finalized (%1); a partial file was kept.")
+                                    .arg(toQString(audio::toString(writer_->lastError())));
+            }
+            writer_.reset();
+        }
+    }
+    pendingOutputFile_.clear();
+    if (!savedFile.isEmpty()) {
+        lastRecordingFile_ = savedFile;
+        emit lastRecordingFileChanged();
+    } else if (!finalizeError.isEmpty()) {
+        fail(finalizeError);
+    }
     (void)session_.handle(audio::SessionEvent::StopComplete);
     (void)session_.handle(audio::SessionEvent::Reset);
     emit statsChanged();
@@ -210,7 +257,7 @@ quint64 RecorderController::framesDropped() const
 }
 
 bool RecorderController::startTrack(TrackPipeline& pipeline, const audio::AudioDeviceInfo& device,
-                                    audio::TrackKind track, audio::ChannelCount channels)
+                                    audio::TrackKind track, audio::ChannelCount channels, int writerTrack)
 {
     auto buffer = std::make_unique<audio::SpscRingBuffer<audio::AudioFrame>>(config_.ringBufferCapacityFrames);
     auto sink = std::make_unique<RingSink>(*buffer);
@@ -243,6 +290,7 @@ bool RecorderController::startTrack(TrackPipeline& pipeline, const audio::AudioD
     pipeline.sink = std::move(sink);
     pipeline.stream = std::move(std::get<std::unique_ptr<audio::IAudioCaptureStream>>(result));
     pipeline.synchronizer = std::make_unique<audio::TrackSynchronizer>(sync);
+    pipeline.writerTrack = writerTrack;
     return true;
 }
 
@@ -251,14 +299,14 @@ bool RecorderController::startStreams()
     bool anyStarted = false;
     if (selectedMicrophone_ >= 0 && selectedMicrophone_ < static_cast<int>(microphones_.size())) {
         if (!startTrack(microphonePipeline_, microphones_[static_cast<std::size_t>(selectedMicrophone_)],
-                        audio::TrackKind::Microphone, audio::ChannelCount{1})) {
+                        audio::TrackKind::Microphone, audio::ChannelCount{1}, writerMicrophoneTrack_)) {
             return false;
         }
         anyStarted = true;
     }
     if (selectedSystemOutput_ >= 0 && selectedSystemOutput_ < static_cast<int>(systemOutputs_.size())) {
         if (!startTrack(systemOutputPipeline_, systemOutputs_[static_cast<std::size_t>(selectedSystemOutput_)],
-                        audio::TrackKind::SystemOutput, audio::ChannelCount{2})) {
+                        audio::TrackKind::SystemOutput, audio::ChannelCount{2}, writerSystemOutputTrack_)) {
             return false;
         }
         anyStarted = true;
@@ -268,8 +316,9 @@ bool RecorderController::startStreams()
 
 void RecorderController::stopStreams()
 {
-    // Stop capture first (deterministic: no onFrame after stop), then drop the
-    // pipelines under the drain lock.
+    // Stop capture first (deterministic: no onFrame after stop), then drain
+    // what the ring buffers still hold — dropping it here would be silent
+    // audio loss (§8) — and finally drop the pipelines under the drain lock.
     if (microphonePipeline_.stream) {
         microphonePipeline_.stream->stop();
     }
@@ -277,8 +326,35 @@ void RecorderController::stopStreams()
         systemOutputPipeline_.stream->stop();
     }
     const std::lock_guard<std::mutex> lock(pipelineMutex_);
+    (void)drainPipelineLocked(microphonePipeline_);
+    (void)drainPipelineLocked(systemOutputPipeline_);
     microphonePipeline_ = {};
     systemOutputPipeline_ = {};
+}
+
+bool RecorderController::drainPipelineLocked(TrackPipeline& pipeline)
+{
+    if (!pipeline.buffer || !pipeline.synchronizer) {
+        return false;
+    }
+    bool sawFrames = false;
+    while (auto frame = pipeline.buffer->tryPop()) {
+        sawFrames = true;
+        const auto aligned = pipeline.synchronizer->process(std::move(*frame));
+        framesCaptured_.fetch_add(aligned.size(), std::memory_order_relaxed);
+        if (!writer_ || pipeline.writerTrack < 0 || writerFailed_.load(std::memory_order_relaxed)) {
+            continue;
+        }
+        for (const auto& output : aligned) {
+            if (!writer_->write(static_cast<std::size_t>(pipeline.writerTrack), output)) {
+                // Keep capturing and counting; onStatsTick() surfaces the
+                // failure once on the UI thread, stop() keeps the partial file.
+                writerFailed_.store(true, std::memory_order_relaxed);
+                break;
+            }
+        }
+    }
+    return sawFrames;
 }
 
 void RecorderController::drainLoop()
@@ -287,23 +363,89 @@ void RecorderController::drainLoop()
         bool sawFrames = false;
         {
             const std::lock_guard<std::mutex> lock(pipelineMutex_);
-            for (TrackPipeline* pipeline : {&microphonePipeline_, &systemOutputPipeline_}) {
-                if (!pipeline->buffer || !pipeline->synchronizer) {
-                    continue;
-                }
-                while (auto frame = pipeline->buffer->tryPop()) {
-                    sawFrames = true;
-                    // Aligned output is counted, then discarded until the
-                    // recording writer (#13) becomes the consumer.
-                    const auto aligned = pipeline->synchronizer->process(std::move(*frame));
-                    framesCaptured_.fetch_add(aligned.size(), std::memory_order_relaxed);
-                }
-            }
+            sawFrames = drainPipelineLocked(microphonePipeline_);
+            sawFrames = drainPipelineLocked(systemOutputPipeline_) || sawFrames;
         }
         if (!sawFrames) {
             std::this_thread::sleep_for(std::chrono::milliseconds{kDrainIdleSleepMs});
         }
     }
+}
+
+bool RecorderController::createWriter()
+{
+    audio::RecordingWriterConfig writerConfig;
+    writerMicrophoneTrack_ = -1;
+    writerSystemOutputTrack_ = -1;
+    if (selectedMicrophone_ >= 0 && selectedMicrophone_ < static_cast<int>(microphones_.size())) {
+        writerMicrophoneTrack_ = static_cast<int>(writerConfig.tracks.size());
+        writerConfig.tracks.push_back(
+            {audio::TrackKind::Microphone,
+             audio::TrackFormat{audio::SampleRate{48000}, audio::ChannelCount{1}, audio::SampleFormat::PcmS16Le},
+             "Microphone"});
+    }
+    if (selectedSystemOutput_ >= 0 && selectedSystemOutput_ < static_cast<int>(systemOutputs_.size())) {
+        writerSystemOutputTrack_ = static_cast<int>(writerConfig.tracks.size());
+        writerConfig.tracks.push_back(
+            {audio::TrackKind::SystemOutput,
+             audio::TrackFormat{audio::SampleRate{48000}, audio::ChannelCount{2}, audio::SampleFormat::PcmS16Le},
+             "System output"});
+    }
+
+    const QDir directory(outputDirectory_);
+    if (!directory.mkpath(QStringLiteral("."))) {
+        fail(tr("Cannot create the recordings folder."));
+        return false;
+    }
+    // Single track -> raw FLAC; several synchronized tracks -> Matroska (§7).
+    const QString extension = writerConfig.tracks.size() == 1 ? QStringLiteral(".flac") : QStringLiteral(".mka");
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    QString candidate = directory.filePath(QStringLiteral("voxmesh-%1%2").arg(stamp, extension));
+    for (int suffix = 2; QFile::exists(candidate); ++suffix) {
+        candidate = directory.filePath(QStringLiteral("voxmesh-%1-%2%3").arg(stamp).arg(suffix).arg(extension));
+    }
+    writerConfig.outputFile = std::filesystem::path(candidate.toStdWString());
+
+    auto result = media::createRecordingWriter(writerConfig);
+    if (const auto* error = std::get_if<audio::RecordingWriterError>(&result)) {
+        fail(tr("Cannot open the recording file (%1).").arg(toQString(audio::toString(*error))));
+        return false;
+    }
+    pendingOutputFile_ = candidate;
+    const std::lock_guard<std::mutex> lock(pipelineMutex_);
+    writer_ = std::move(std::get<std::unique_ptr<audio::IRecordingWriter>>(result));
+    writerFailed_.store(false, std::memory_order_relaxed);
+    writerFailureReported_ = false;
+    return true;
+}
+
+void RecorderController::discardWriter()
+{
+    const std::lock_guard<std::mutex> lock(pipelineMutex_);
+    if (writer_) {
+        // Nothing worth keeping was recorded; remove the partial file too.
+        writer_->abort();
+        writer_.reset();
+    }
+    pendingOutputFile_.clear();
+}
+
+void RecorderController::setOutputDirectory(const QString& directory)
+{
+    if (!isIdle() || directory.isEmpty() || directory == outputDirectory_) {
+        return;
+    }
+    outputDirectory_ = directory;
+    emit outputDirectoryChanged();
+}
+
+void RecorderController::onStatsTick()
+{
+    if (writerFailed_.load(std::memory_order_relaxed) && !writerFailureReported_) {
+        writerFailureReported_ = true;
+        fail(tr("Saving the recording failed; capture continues but audio is no longer written to disk."));
+    }
+    emit statsChanged();
 }
 
 void RecorderController::fail(const QString& message)

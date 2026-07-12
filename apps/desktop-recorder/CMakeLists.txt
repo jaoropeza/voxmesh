@@ -1,5 +1,5 @@
-# Recorder UI (issue #14): device selection, recording indicator, transport
-# controls over the capture pipeline. Persistence arrives with the writer (#13).
+# Recorder UI (issues #14, #13): device selection, recording indicator,
+# transport controls, and lossless FLAC/Matroska recording to disk.
 find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Qml Quick)
 
 if(NOT Qt6_FOUND)
@@ -28,6 +28,7 @@ target_link_libraries(voxmesh-recorder-core
         voxmesh::audio-core
         Qt6::Core
     PRIVATE
+        voxmesh::media-container
         voxmesh::build_flags)
 if(WIN32)
     target_link_libraries(voxmesh-recorder-core PRIVATE voxmesh::audio-wasapi)
