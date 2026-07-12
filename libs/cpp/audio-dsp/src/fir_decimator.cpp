@@ -32,8 +32,8 @@ std::vector<double> designLowPass(std::size_t taps, double cutoff)
 
 std::int16_t clampToS16(double value)
 {
-    const double rounded = std::lround(value);
-    return static_cast<std::int16_t>(std::clamp(rounded, -32768.0, 32767.0));
+    const long rounded = std::lround(value);
+    return static_cast<std::int16_t>(std::clamp<long>(rounded, -32768, 32767));
 }
 
 } // namespace
