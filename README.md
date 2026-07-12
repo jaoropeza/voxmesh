@@ -1,5 +1,7 @@
 # VoxMesh
 
+![VoxMesh](docs/img/logo.png)
+
 Enterprise, cross-platform meeting recording, transcription, translation, diarization,
 summarization, and semantic-search platform.
 
