@@ -98,3 +98,5 @@ jobs:
         run: cmake --preset linux-debug -DVOXMESH_REQUIRE_QT=ON
       - name: Build
         run: cmake --build --preset linux-debug
+      - name: Test (includes Qt-dependent recorder controller tests)
+        run: ctest --preset linux-debug

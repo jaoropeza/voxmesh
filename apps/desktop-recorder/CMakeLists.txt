@@ -1,5 +1,5 @@
-# Minimal Phase 0 shell: proves the Qt/QML/CMake/packaging path end to end.
-# No audio capture here — that arrives with Phase 1 (audio-core) and Phase 2 (WASAPI).
+# Recorder UI (issue #14): device selection, recording indicator, transport
+# controls over the capture pipeline. Persistence arrives with the writer (#13).
 find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Qml Quick)
 
 if(NOT Qt6_FOUND)
@@ -11,6 +11,27 @@ if(NOT Qt6_FOUND)
 endif()
 
 qt_standard_project_setup(REQUIRES 6.5)
+if(QT_KNOWN_POLICY_QTP0004)
+    qt_policy(SET QTP0004 NEW)
+endif()
+
+# Controller/backend-factory library shared by the app and its tests.
+add_library(voxmesh-recorder-core STATIC
+    src/backend_factory.cpp
+    src/backend_factory.hpp
+    src/recorder_controller.cpp
+    src/recorder_controller.hpp)
+set_target_properties(voxmesh-recorder-core PROPERTIES AUTOMOC ON)
+target_include_directories(voxmesh-recorder-core PUBLIC src)
+target_link_libraries(voxmesh-recorder-core
+    PUBLIC
+        voxmesh::audio-core
+        Qt6::Core
+    PRIVATE
+        voxmesh::build_flags)
+if(WIN32)
+    target_link_libraries(voxmesh-recorder-core PRIVATE voxmesh::audio-wasapi)
+endif()
 
 qt_add_executable(voxmesh-recorder
     src/main.cpp)
@@ -22,9 +43,14 @@ qt_add_qml_module(voxmesh-recorder
         qml/Main.qml)
 
 target_link_libraries(voxmesh-recorder PRIVATE
+    voxmesh-recorder-core
     voxmesh::core
     voxmesh::build_flags
     Qt6::Core
     Qt6::Gui
     Qt6::Qml
     Qt6::Quick)
+
+if(VOXMESH_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
