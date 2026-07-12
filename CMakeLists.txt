@@ -42,4 +42,5 @@ if(VOXMESH_BUILD_TESTS)
 endif()
 
 add_subdirectory(libs/cpp)
+add_subdirectory(platform/windows/audio-wasapi)
 add_subdirectory(apps/desktop-recorder)
