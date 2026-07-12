@@ -18,7 +18,8 @@ libs in `libs/cpp`, platform audio backends in `platform/`), ASP.NET Core contro
 
 Delivery phases (master prompt §31): 0 foundation → 1 platform-neutral audio core → 2 Windows
 vertical slice (first MVP) → 3 backend → 4 macOS → 5 Ubuntu → 6 AI post-processing → 7 provider
-adapters. **Phase 0 is complete; Phase 1 is next.**
+adapters. **Phases 0 and 1 are implemented (audio core in `libs/cpp/audio-core` — see its README);
+Phase 2 (Windows WASAPI vertical slice) is next and needs a local C++ toolchain + Qt.**
 
 ## Claude Code's role here
 
@@ -36,7 +37,7 @@ Full details in [README.md](README.md). Quick reference:
 conan install . --output-folder build/conan --build=missing -s build_type=Debug
 cmake --preset windows-debug && cmake --build --preset windows-debug
 ctest --preset windows-debug                    # all C++ tests
-ctest --preset windows-debug -R VersionTest     # single test filter
+ctest --preset windows-debug -R RingBufferTest  # single test filter (VersionTest, SessionTest, ...)
 
 # Control plane (.NET 10)
 dotnet test services/control-plane              # all tests

@@ -16,5 +16,7 @@ class VoxMeshConan(ConanFile):
 
     def requirements(self):
         self.requires("gtest/1.15.0")
+        self.requires("nlohmann_json/3.11.3")
+        self.requires("benchmark/1.9.1")
         # Later phases (pin when introduced): protobuf, grpc, ffmpeg,
         # webrtc-audio-processing, opentelemetry-cpp.
