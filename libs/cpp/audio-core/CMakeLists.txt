@@ -1,6 +1,7 @@
 find_package(nlohmann_json REQUIRED)
 
 add_library(voxmesh-audio-core STATIC
+    src/clock_sync.cpp
     src/config.cpp
     src/session.cpp
     src/testing/fake_backend.cpp
