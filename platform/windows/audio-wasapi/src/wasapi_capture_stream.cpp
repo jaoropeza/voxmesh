@@ -209,6 +209,37 @@ void WasapiCaptureStream::captureLoop(IAudioClient* /*audioClient*/, IAudioCaptu
     const std::size_t blockAlign =
         audio::bytesPerSample(config_.format) * static_cast<std::size_t>(config_.channels.value);
 
+    const auto emitFrame = [this](audio::AudioFrame&& frame) {
+        if (sink_->onFrame(std::move(frame))) {
+            framesEmitted_.fetch_add(1, std::memory_order_relaxed);
+            pendingDiscontinuity_ = false;
+        } else {
+            framesDropped_.fetch_add(1, std::memory_order_relaxed);
+            pendingDiscontinuity_ = true;
+        }
+        nextSequence_.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    // Loopback silence synthesis (§9, issue #29): loopback endpoints deliver
+    // packets only while the device renders; the track must instead be
+    // continuous explicit silence. The cursor tracks the end of emitted audio
+    // on the same QPC timeline WASAPI stamps packets with.
+    const std::int64_t frameNs = std::chrono::duration_cast<std::chrono::nanoseconds>(config_.frameDuration).count();
+    const std::size_t samplesPerFrame = audio::samplesPerChannel(config_.sampleRate, config_.frameDuration);
+    LARGE_INTEGER qpcFrequency{};
+    ::QueryPerformanceFrequency(&qpcFrequency);
+    const auto qpcNowNs = [&qpcFrequency]() -> std::int64_t {
+        LARGE_INTEGER counter{};
+        ::QueryPerformanceCounter(&counter);
+        const std::int64_t whole = counter.QuadPart / qpcFrequency.QuadPart;
+        const std::int64_t rem = counter.QuadPart % qpcFrequency.QuadPart;
+        return whole * 1'000'000'000 + rem * 1'000'000'000 / qpcFrequency.QuadPart;
+    };
+    // Matches the clock-sync maxSilencePerGap policy: a longer stall (system
+    // sleep, debugger) becomes a discontinuity, not a silence flood.
+    constexpr std::int64_t kMaxSynthesizedGapNs = 5'000'000'000;
+    std::int64_t loopbackCursorNs = qpcNowNs();
+
     // Event-driven for capture endpoints; poll-driven for loopback (10 ms is
     // comfortably inside the 4x-frameDuration shared buffer).
     HANDLE waitHandles[2] = {stopEvent_, dataEvent};
@@ -254,14 +285,33 @@ void WasapiCaptureStream::captureLoop(IAudioClient* /*audioClient*/, IAudioCaptu
             }
             captureClient->ReleaseBuffer(frames);
 
-            if (sink_->onFrame(std::move(frame))) {
-                framesEmitted_.fetch_add(1, std::memory_order_relaxed);
-                pendingDiscontinuity_ = false;
-            } else {
-                framesDropped_.fetch_add(1, std::memory_order_relaxed);
-                pendingDiscontinuity_ = true;
-            }
-            nextSequence_.fetch_add(1, std::memory_order_relaxed);
+            loopbackCursorNs = frame.timestamp.value.count() + static_cast<std::int64_t>(frames) * 1'000'000'000 /
+                                                                   static_cast<std::int64_t>(config_.sampleRate.hz);
+            emitFrame(std::move(frame));
+        }
+
+        if (!loopback_) {
+            continue;
+        }
+        const std::int64_t now = qpcNowNs();
+        if (now - loopbackCursorNs > kMaxSynthesizedGapNs) {
+            loopbackCursorNs = now - 2 * frameNs;
+            pendingDiscontinuity_ = true;
+        }
+        // Stay one frame behind real time so a late render packet lands ahead
+        // of, never underneath, synthesized silence.
+        while (now - loopbackCursorNs >= 2 * frameNs) {
+            audio::AudioFrame silence;
+            silence.track = config_.track;
+            silence.sequence = audio::SequenceNumber{nextSequence_.load(std::memory_order_relaxed)};
+            silence.timestamp = audio::MonotonicTimestamp{std::chrono::nanoseconds{loopbackCursorNs}};
+            silence.sampleRate = config_.sampleRate;
+            silence.channels = config_.channels;
+            silence.format = config_.format;
+            silence.discontinuity = pendingDiscontinuity_;
+            silence.payload.resize(samplesPerFrame * blockAlign); // zero-filled
+            loopbackCursorNs += frameNs;
+            emitFrame(std::move(silence));
         }
     }
 }

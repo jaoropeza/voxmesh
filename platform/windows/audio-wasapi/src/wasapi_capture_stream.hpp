@@ -20,9 +20,9 @@ namespace voxmesh::platform::windows {
 // client unless a companion render stream pumps the engine. Initialization
 // happens on the capture thread; start() blocks until the device is capturing
 // (or reports the precise CaptureError). One AudioFrame is emitted per WASAPI
-// packet (device period, ~10 ms). Note that a loopback stream only produces
-// packets while the endpoint is rendering something — silence-when-idle is a
-// WASAPI property, not a defect.
+// packet (device period, ~10 ms). WASAPI loopback produces packets only while
+// the endpoint renders something; the loop synthesizes explicit silence frames
+// while the device is idle so the track is continuous (§9, issue #29).
 //
 // Known deviation from §8, tracked as issue #17: each frame payload is heap-
 // allocated on the capture thread until a recycling pool exists downstream.
