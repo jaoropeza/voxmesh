@@ -72,5 +72,11 @@ class VoxMeshConan(ConanFile):
         self.requires("nlohmann_json/3.11.3")
         self.requires("benchmark/1.9.1")
         self.requires("ffmpeg/7.1.5")
-        # Later phases (pin when introduced): protobuf, grpc,
-        # webrtc-audio-processing, opentelemetry-cpp.
+        # Streaming STT path (issue #15, ADR-0008). protobuf is pinned to the
+        # version grpc/1.72.0 requires. No tool_requires: we never cross-compile
+        # today, so codegen uses the host packages' own protoc/grpc_cpp_plugin
+        # (a build-context grpc would double the dependency build time).
+        self.requires("grpc/1.72.0")
+        self.requires("protobuf/5.27.0")
+        # Later phases (pin when introduced): webrtc-audio-processing,
+        # opentelemetry-cpp.

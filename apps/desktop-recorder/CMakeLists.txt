@@ -26,6 +26,8 @@ target_include_directories(voxmesh-recorder-core PUBLIC src)
 target_link_libraries(voxmesh-recorder-core
     PUBLIC
         voxmesh::audio-core
+        voxmesh::audio-dsp
+        voxmesh::streaming-client
         Qt6::Core
     PRIVATE
         voxmesh::media-container
