@@ -52,6 +52,9 @@ RecorderController::RecorderController(audio::IAudioCaptureBackend& backend, QOb
 RecorderController::~RecorderController()
 {
     stopStreams();
+    // Join the client's reader thread before members die — its callback
+    // targets this object.
+    stopSttStreaming();
     drainStop_.store(true);
     if (drainThread_.joinable()) {
         drainThread_.join();
@@ -102,9 +105,11 @@ bool RecorderController::start()
         discardWriter();
         return false;
     }
+    startSttStreaming(); // auxiliary: a failure is surfaced but never blocks recording
     if (!startStreams()) {
         stopStreams();
         discardWriter();
+        stopSttStreaming();
         (void)session_.handle(audio::SessionEvent::Fault);
         (void)session_.handle(audio::SessionEvent::Reset);
         return false;
@@ -172,6 +177,7 @@ bool RecorderController::stop()
         }
     }
     pendingOutputFile_.clear();
+    stopSttStreaming();
     if (!savedFile.isEmpty()) {
         lastRecordingFile_ = savedFile;
         emit lastRecordingFileChanged();
@@ -257,7 +263,8 @@ quint64 RecorderController::framesDropped() const
 }
 
 bool RecorderController::startTrack(TrackPipeline& pipeline, const audio::AudioDeviceInfo& device,
-                                    audio::TrackKind track, audio::ChannelCount channels, int writerTrack)
+                                    audio::TrackKind track, audio::ChannelCount channels, int writerTrack,
+                                    bool feedsSttStream)
 {
     auto buffer = std::make_unique<audio::SpscRingBuffer<audio::AudioFrame>>(config_.ringBufferCapacityFrames);
     auto sink = std::make_unique<RingSink>(*buffer);
@@ -291,22 +298,29 @@ bool RecorderController::startTrack(TrackPipeline& pipeline, const audio::AudioD
     pipeline.stream = std::move(std::get<std::unique_ptr<audio::IAudioCaptureStream>>(result));
     pipeline.synchronizer = std::make_unique<audio::TrackSynchronizer>(sync);
     pipeline.writerTrack = writerTrack;
+    pipeline.feedsSttStream = feedsSttStream;
     return true;
 }
 
 bool RecorderController::startStreams()
 {
     bool anyStarted = false;
-    if (selectedMicrophone_ >= 0 && selectedMicrophone_ < static_cast<int>(microphones_.size())) {
+    const bool microphoneSelected =
+        selectedMicrophone_ >= 0 && selectedMicrophone_ < static_cast<int>(microphones_.size());
+    if (microphoneSelected) {
+        // The STT stream derives from the microphone when present (§7 Track 5);
+        // the optional mixed track is a later slice.
         if (!startTrack(microphonePipeline_, microphones_[static_cast<std::size_t>(selectedMicrophone_)],
-                        audio::TrackKind::Microphone, audio::ChannelCount{1}, writerMicrophoneTrack_)) {
+                        audio::TrackKind::Microphone, audio::ChannelCount{1}, writerMicrophoneTrack_,
+                        /*feedsSttStream=*/true)) {
             return false;
         }
         anyStarted = true;
     }
     if (selectedSystemOutput_ >= 0 && selectedSystemOutput_ < static_cast<int>(systemOutputs_.size())) {
         if (!startTrack(systemOutputPipeline_, systemOutputs_[static_cast<std::size_t>(selectedSystemOutput_)],
-                        audio::TrackKind::SystemOutput, audio::ChannelCount{2}, writerSystemOutputTrack_)) {
+                        audio::TrackKind::SystemOutput, audio::ChannelCount{2}, writerSystemOutputTrack_,
+                        /*feedsSttStream=*/!microphoneSelected)) {
             return false;
         }
         anyStarted = true;
@@ -342,6 +356,14 @@ bool RecorderController::drainPipelineLocked(TrackPipeline& pipeline)
         sawFrames = true;
         const auto aligned = pipeline.synchronizer->process(std::move(*frame));
         framesCaptured_.fetch_add(aligned.size(), std::memory_order_relaxed);
+        if (pipeline.feedsSttStream && sttProducer_ && sttClient_) {
+            for (const auto& output : aligned) {
+                for (const auto& sttFrame : sttProducer_->process(output)) {
+                    // Drops are counted in the client; uploading never blocks.
+                    (void)sttClient_->sendFrame(sttFrame);
+                }
+            }
+        }
         if (!writer_ || pipeline.writerTrack < 0 || writerFailed_.load(std::memory_order_relaxed)) {
             continue;
         }
@@ -437,6 +459,102 @@ void RecorderController::setOutputDirectory(const QString& directory)
     }
     outputDirectory_ = directory;
     emit outputDirectoryChanged();
+}
+
+void RecorderController::setSttEndpoint(const QString& endpoint)
+{
+    if (!isIdle() || endpoint == sttEndpoint_) {
+        return;
+    }
+    sttEndpoint_ = endpoint;
+    emit sttEndpointChanged();
+}
+
+void RecorderController::startSttStreaming()
+{
+    if (sttEndpoint_.isEmpty()) {
+        return;
+    }
+    transcriptLines_.clear();
+    transcriptSegmentIds_.clear();
+    emit transcriptChanged();
+
+    // The STT stream derives from the microphone track when selected,
+    // otherwise from the (stereo) system-output track.
+    const bool microphoneSelected =
+        selectedMicrophone_ >= 0 && selectedMicrophone_ < static_cast<int>(microphones_.size());
+    dsp::SttStreamConfig producerConfig;
+    producerConfig.input =
+        microphoneSelected
+            ? audio::TrackFormat{audio::SampleRate{48000}, audio::ChannelCount{1}, audio::SampleFormat::PcmS16Le}
+            : audio::TrackFormat{audio::SampleRate{48000}, audio::ChannelCount{2}, audio::SampleFormat::PcmS16Le};
+    producerConfig.output = config_.sttStream;
+    producerConfig.frameDuration = config_.sttFrameDuration;
+    auto producer = dsp::SttStreamProducer::create(producerConfig);
+    if (!producer.has_value()) {
+        fail(tr("Transcription is unavailable (unsupported STT stream configuration)."));
+        return;
+    }
+
+    stt::GrpcSttClientConfig clientConfig;
+    clientConfig.endpoint = sttEndpoint_.toStdString();
+    clientConfig.session.sessionId = QDateTime::currentDateTime().toString(Qt::ISODate).toStdString();
+    auto client = stt::createGrpcSttStreamClient(clientConfig);
+    const bool connected = client->start([this](const stt::TranscriptUpdate& update) {
+        // Reader-thread callback: marshal onto the UI thread.
+        QMetaObject::invokeMethod(this, [this, update] { applyTranscript(update); }, Qt::QueuedConnection);
+    });
+    if (!connected) {
+        fail(tr("Transcription service is unreachable; recording continues without it."));
+        return;
+    }
+
+    const std::lock_guard<std::mutex> lock(pipelineMutex_);
+    sttProducer_ = std::move(producer);
+    sttClient_ = std::move(client);
+    sttActive_ = true;
+    emit sttStateChanged();
+}
+
+void RecorderController::stopSttStreaming()
+{
+    std::unique_ptr<stt::ISttStreamClient> client;
+    {
+        const std::lock_guard<std::mutex> lock(pipelineMutex_);
+        client = std::move(sttClient_);
+        sttProducer_.reset();
+    }
+    if (client) {
+        client->stop();
+    }
+    if (sttActive_) {
+        sttActive_ = false;
+        emit sttStateChanged();
+    }
+}
+
+void RecorderController::applyTranscript(const stt::TranscriptUpdate& update)
+{
+    QString line = QString::fromStdString(update.stableText);
+    const QString mutablePart = QString::fromStdString(update.mutableText);
+    if (!mutablePart.isEmpty()) {
+        if (!line.isEmpty()) {
+            line += QLatin1Char(' ');
+        }
+        line += mutablePart + QStringLiteral("…");
+    }
+    const QString segmentId = QString::fromStdString(update.segmentId);
+    // Revisions replace the same segment's line (voxmesh.transcript.v1).
+    for (std::size_t i = 0; i < transcriptSegmentIds_.size(); ++i) {
+        if (transcriptSegmentIds_[i] == segmentId) {
+            transcriptLines_[static_cast<qsizetype>(i)] = line;
+            emit transcriptChanged();
+            return;
+        }
+    }
+    transcriptSegmentIds_.push_back(segmentId);
+    transcriptLines_.append(line);
+    emit transcriptChanged();
 }
 
 void RecorderController::onStatsTick()

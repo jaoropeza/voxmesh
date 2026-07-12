@@ -6,6 +6,8 @@
 #include "voxmesh/audio/recording.hpp"
 #include "voxmesh/audio/ring_buffer.hpp"
 #include "voxmesh/audio/session.hpp"
+#include "voxmesh/dsp/stt_stream_producer.hpp"
+#include "voxmesh/stt/stt_stream_client.hpp"
 
 #include <QObject>
 #include <QString>
@@ -16,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -49,6 +52,9 @@ class RecorderController : public QObject {
     Q_PROPERTY(QString lastError READ lastError NOTIFY errorChanged)
     Q_PROPERTY(QString outputDirectory READ outputDirectory WRITE setOutputDirectory NOTIFY outputDirectoryChanged)
     Q_PROPERTY(QString lastRecordingFile READ lastRecordingFile NOTIFY lastRecordingFileChanged)
+    Q_PROPERTY(QString sttEndpoint READ sttEndpoint WRITE setSttEndpoint NOTIFY sttEndpointChanged)
+    Q_PROPERTY(bool sttActive READ sttActive NOTIFY sttStateChanged)
+    Q_PROPERTY(QStringList transcriptLines READ transcriptLines NOTIFY transcriptChanged)
 
 public:
     // The backend must outlive the controller.
@@ -78,6 +84,12 @@ public:
     // Takes effect at the next start(); ignored while a recording is active.
     void setOutputDirectory(const QString& directory);
     [[nodiscard]] QString lastRecordingFile() const { return lastRecordingFile_; }
+    [[nodiscard]] QString sttEndpoint() const { return sttEndpoint_; }
+    // host:port of an SttStreamService; empty disables streaming transcription.
+    // Takes effect at the next start(); ignored while a recording is active.
+    void setSttEndpoint(const QString& endpoint);
+    [[nodiscard]] bool sttActive() const { return sttActive_; }
+    [[nodiscard]] QStringList transcriptLines() const { return transcriptLines_; }
 
 signals:
     void sessionStateChanged();
@@ -87,6 +99,9 @@ signals:
     void errorChanged();
     void outputDirectoryChanged();
     void lastRecordingFileChanged();
+    void sttEndpointChanged();
+    void sttStateChanged();
+    void transcriptChanged();
 
 private:
     class RingSink;
@@ -99,14 +114,19 @@ private:
         // Index into the writer's track list; -1 when the writer has no track
         // for this pipeline.
         int writerTrack{-1};
+        // True when this pipeline is the source of the derived STT stream.
+        bool feedsSttStream{false};
     };
 
     [[nodiscard]] bool startStreams();
     void stopStreams();
     [[nodiscard]] bool startTrack(TrackPipeline& pipeline, const audio::AudioDeviceInfo& device, audio::TrackKind track,
-                                  audio::ChannelCount channels, int writerTrack);
+                                  audio::ChannelCount channels, int writerTrack, bool feedsSttStream);
     [[nodiscard]] bool createWriter();
     void discardWriter();
+    void startSttStreaming();
+    void stopSttStreaming();
+    void applyTranscript(const stt::TranscriptUpdate& update);
     // Requires pipelineMutex_ held. Returns true when any frame was drained.
     bool drainPipelineLocked(TrackPipeline& pipeline);
     void drainLoop();
@@ -127,6 +147,9 @@ private:
     TrackPipeline systemOutputPipeline_;
     // Guarded by pipelineMutex_; lives from start() until stop() finalizes it.
     std::unique_ptr<audio::IRecordingWriter> writer_;
+    // Guarded by pipelineMutex_ (fed by the drain thread).
+    std::optional<dsp::SttStreamProducer> sttProducer_;
+    std::unique_ptr<stt::ISttStreamClient> sttClient_;
 
     std::thread drainThread_;
     std::atomic<bool> drainStop_{false};
@@ -141,6 +164,12 @@ private:
     QString lastRecordingFile_;
     int writerMicrophoneTrack_{-1};
     int writerSystemOutputTrack_{-1};
+
+    QString sttEndpoint_;
+    bool sttActive_{false};
+    // UI-thread only: latest revision per segment, in first-seen order.
+    QStringList transcriptLines_;
+    std::vector<QString> transcriptSegmentIds_;
 
     QString lastError_;
     QTimer statsTimer_;

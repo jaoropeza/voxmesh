@@ -1,6 +1,7 @@
 #include "recorder_controller.hpp"
 
 #include "voxmesh/audio/testing/fake_backend.hpp"
+#include "voxmesh/stt/testing/mock_stt_server.hpp"
 
 #include <gtest/gtest.h>
 
@@ -183,6 +184,61 @@ TEST_F(RecorderControllerTest, ConsecutiveRecordingsGetDistinctFiles)
     ASSERT_TRUE(controller_->stop());
 
     EXPECT_EQ(recordedFiles().size(), 2);
+}
+
+TEST_F(RecorderControllerTest, TranscriptLinesArriveFromMockSttServer)
+{
+    stt::testing::MockSttStreamServer mockServer;
+    ASSERT_TRUE(mockServer.start());
+    controller_->setSttEndpoint(QStringLiteral("127.0.0.1:%1").arg(mockServer.port()));
+    controller_->setSelectedSystemOutput(-1); // mic-only: lastStream() is the mic
+
+    ASSERT_TRUE(controller_->start());
+    EXPECT_TRUE(controller_->sttActive());
+
+    // 60 x 10 ms input frames = 600 ms = 6 STT frames; the mock scripts one
+    // update per 5 STT frames.
+    backend_.lastStream()->emitFrames(60);
+    ASSERT_TRUE(waitForFrames(*controller_, 60));
+
+    // Transcript updates arrive via queued invocation on the UI thread.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (controller_->transcriptLines().isEmpty() && std::chrono::steady_clock::now() < deadline) {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    ASSERT_FALSE(controller_->transcriptLines().isEmpty());
+    // First scripted revision is a partial: mutable text marked with an ellipsis.
+    EXPECT_TRUE(controller_->transcriptLines().first().endsWith(QStringLiteral("…")));
+
+    ASSERT_TRUE(controller_->stop());
+    EXPECT_FALSE(controller_->sttActive());
+    EXPECT_GT(mockServer.stats().framesReceived, 0u);
+    EXPECT_EQ(mockServer.stats().invalidFrames, 0u);
+}
+
+TEST_F(RecorderControllerTest, RecordingWorksWithoutSttEndpoint)
+{
+    // No endpoint set: recording must be unaffected and no transcript appears.
+    ASSERT_TRUE(controller_->start());
+    EXPECT_FALSE(controller_->sttActive());
+    backend_.lastStream()->emitFrames(10);
+    ASSERT_TRUE(waitForFrames(*controller_, 10));
+    ASSERT_TRUE(controller_->stop());
+    EXPECT_TRUE(controller_->transcriptLines().isEmpty());
+}
+
+TEST_F(RecorderControllerTest, UnreachableSttEndpointDoesNotBlockRecording)
+{
+    controller_->setSttEndpoint(QStringLiteral("127.0.0.1:1"));
+
+    ASSERT_TRUE(controller_->start());
+    EXPECT_FALSE(controller_->sttActive());
+    EXPECT_FALSE(controller_->lastError().isEmpty()); // surfaced, not fatal
+    backend_.lastStream()->emitFrames(10);
+    ASSERT_TRUE(waitForFrames(*controller_, 10));
+    ASSERT_TRUE(controller_->stop());
+    EXPECT_FALSE(recordedFiles().isEmpty()); // the recording still saved
 }
 
 TEST_F(RecorderControllerTest, StopWithoutCapturedAudioSavesNothing)

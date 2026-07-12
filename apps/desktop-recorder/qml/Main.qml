@@ -144,6 +144,29 @@ ApplicationWindow {
       Layout.fillWidth: true
     }
 
+    GroupBox {
+      title: recorder.sttActive ? qsTr("Live transcript (mock STT)") : qsTr("Live transcript")
+      visible: recorder.sttEndpoint.length > 0
+      Layout.fillWidth: true
+      Layout.fillHeight: true
+
+      ListView {
+        id: transcriptView
+        anchors.fill: parent
+        clip: true
+        model: recorder.transcriptLines
+        delegate: Label {
+          required property string modelData
+          text: modelData
+          wrapMode: Text.WordWrap
+          width: transcriptView.width
+          // Trailing ellipsis marks still-mutable partial text.
+          opacity: modelData.endsWith("…") ? 0.7 : 1.0
+        }
+        onCountChanged: positionViewAtEnd()
+      }
+    }
+
     Item { Layout.fillHeight: true }
 
     Label {
